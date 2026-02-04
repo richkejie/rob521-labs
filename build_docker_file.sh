@@ -1,0 +1,1 @@
+docker build -t rob521-labs-img --build-arg USER_ID=$(id -u) --build-arg GROUP_ID=$(id -g) .

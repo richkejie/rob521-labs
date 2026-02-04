@@ -2,24 +2,28 @@
 
 This repo is for ROB521 Labs.
 
-# Using ROS-Noetic with Docker (for Windows users)
+# Docker Setup (ROB521 Instructions) --- For Windows Users
 
 1.  Install Docker: https://docs.docker.com/get-started/get-docker/ (also install WSL)
 2.  Install the Docker VSCode extension: https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-docker
-3.  After installing the extension, go to the root of this repo (where the Dockerfile is located)
-4.  Right click on the Dockerfile in VSCode and click 'Build Image'. Optionally, run: `docker build -t rob521-ros_noetic .` (the `.` is important, specifies current directory) (`rob521-ros_noetic` is the image name, can be whatever you want)
-5.  `docker run --name ros_container --user=user --env=DISPLAY=host.docker.internal:0 --volume="$(pwd):/mnt" --restart=no --runtime=runc --volume="C:\\:/mnt/c" --network=host -t -d rob521-ros_noetic
-`
-6.  At this point, you can open Docker Desktop (just search for Docker in the start menu), and you will see your image and also your container running.
-7.  You can run `docker ps` to see what containers are running.
+3.  Run the command in the `build_docker_file.sh` file. This builds the image (uses bash).
+4.  Run the command in the `run_docker_container.sh` file. This runs the container and opens a terminal session in that environment. You should see the repo's files mounted in the workspace.
+5.  If you stopped the container, run `docker start -ai rob521_container` to get it running in your terminal again.
 
 ## Getting a GUI with Docker using Xming
 
 1.  Download Xming: https://sourceforge.net/projects/xming/
-2.  Open XLaunch and select: Multiple windows, Display number 0, Start no client, Clipboard, finish!
-3.  With the container running, run terminator: `terminator -u&` (run this in the terminal/exec tab of the container in Docker Desktop)
+2.  Open XLaunch and select: Multiple windows, Display number 0, Start no client, Clipboard and No Access Control, finish!
+3.  Note, in `run_docker_container.sh` I changed the env argument for this to work (just a Windows thing...)
 
 ## Setup ROS
 
-1.  In the terminator window, run: `source /opt/ros/noetic/setup.bash` (can add this to .bashrc)
-2.  Install rviz: `sudo apt-get install ros-noetic-rviz`
+1.  `cd /workspace`
+2.  `catkin_make`
+3.  `source devel/setup.bash`
+
+If everything is working (make sure XLaunch is running), run gazebo: `roslaunch turtlebot3_gazebo turtlebo3_empty_world.launch`
+
+## Other Notes
+
+- In the container environment, you should see your Windows files included under
