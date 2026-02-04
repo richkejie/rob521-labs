@@ -22,3 +22,4 @@ This repo is for ROB521 Labs.
 ## Setup ROS
 
 1.  In the terminator window, run: `source /opt/ros/noetic/setup.bash` (can add this to .bashrc)
+2.  Install rviz: `sudo apt-get install ros-noetic-rviz`
