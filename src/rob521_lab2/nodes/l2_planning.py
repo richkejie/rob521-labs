@@ -94,27 +94,94 @@ class PathPlanner:
         return 0
     
     def simulate_trajectory(self, node_i, point_s):
-        #Simulates the non-holonomic motion of the robot.
-        #This function drives the robot from node_i towards point_s. This function does has many solutions!
-        #node_i is a 3 by 1 vector [x;y;theta] this can be used to construct the SE(2) matrix T_{OI} in course notation
-        #point_s is the sampled point vector [x; y]
-        print("TO DO: Implment a method to simulate a trajectory given a sampled point")
+        """
+        Simulates the non-holonomic motion of the robot from node_i towards point_s.
+        
+        Args:
+            node_i (np.ndarray): 3 by 1 vector [x; y; theta] (the starting pose)
+            point_s (np.ndarray): 2 by 1 vector [x; y] (the sampled point)
+            
+        Returns:
+            np.ndarray: 3 x num_substeps matrix representing the robot's path
+        """
+        # Get the control inputs (v, omega) based on the current state and target
         vel, rot_vel = self.robot_controller(node_i, point_s)
 
-        robot_traj = self.trajectory_rollout(vel, rot_vel)
+        # Roll out the trajectory starting from the current node's pose
+        # We pass node_i as the x0 starting point
+        robot_traj = self.trajectory_rollout(vel, rot_vel, x0=node_i)
+        
         return robot_traj
     
     def robot_controller(self, node_i, point_s):
-        #This controller determines the velocities that will nominally move the robot from node i to node s
-        #Max velocities should be enforced
-        print("TO DO: Implement a control scheme to drive you towards the sampled point")
-        return 0, 0
+        """
+        Determines the velocities to move the robot from node_i towards point_s.
+        
+        Args:
+            node_i (np.ndarray): 3 x 1 vector [x; y; theta] (current pose)
+            point_s (np.ndarray): 2 x 1 vector [x; y] (target point)
+        Returns:
+            tuple: (vel, rot_vel) clamped by max limits
+        """
+        # Calculate distance and angle to the target
+        dx = point_s[0, 0] - node_i[0, 0]
+        dy = point_s[1, 0] - node_i[1, 0]
+
+        dist_to_target = np.sqrt(dx**2 + dy**2)
+        angle_to_target = np.arctan2(dy, dx)
+
+        # Calculate heading error
+        angle_err = angle_to_target - node_i[2, 0]
+        # confine angle fix to within [-180, 180]:
+        angle_err = np.arctan2(np.sin(angle_err), np.cos(angle_err))
+
+        # simple proportional control
+        kp_v = 1
+        kp_w = 4
+
+        vel = kp_v * dist_to_target
+        rot_vel = kp_w * angle_err
+
+        # enforce max velocities
+        vel = np.clip(vel, -self.vel_max, self.vel_max)
+        rot_vel = np.clip(rot_vel, -self.rot_vel_max, self.rot_vel_max)
+
+        return vel, rot_vel
     
-    def trajectory_rollout(self, vel, rot_vel):
-        # Given your chosen velocities determine the trajectory of the robot for your given timestep
-        # The returned trajectory should be a series of points to check for collisions
-        print("TO DO: Implement a way to rollout the controls chosen")
-        return np.zeros((3, self.num_substeps))
+    def trajectory_rollout(self, vel, rot_vel, x0=np.zeros((3,1))):
+        """
+        Given chosen velocities, determine the trajectory of the robot 
+        for the given timestep using the unicycle model.
+        
+        Args:
+            vel (float): Linear velocity (m/s)
+            rot_vel (float): Angular velocity (rad/s)
+        Returns:
+            np.ndarray: 3 x num_substeps matrix of [x; y; theta] points
+        """
+        # dt is time increment for each substep
+        dt = self.timestep / self.num_substeps
+
+        # initialize trajectory array
+        trajectory = np.zeros((3, self.num_substeps))
+
+        # starting values
+        curr_x = x0[0,0]
+        curr_y = x0[1,0]
+        curr_theta = x0[2,0]
+
+        for i in range(self.num_substeps):
+            # unicycle kinematic model:
+            # x_dot = v * cos(theta)
+            # y_dot = v * sin(theta)
+            # theta_dot = omega
+            curr_x += vel * np.cos(curr_theta) * dt
+            curr_y += vel * np.sin(curr_theta) * dt
+            curr_theta += rot_vel * dt
+
+            trajectory[:, i] = [curr_x, curr_y, curr_theta]
+
+        return trajectory
     
     def point_to_cell(self, point):
         """
@@ -133,17 +200,17 @@ class PathPlanner:
         origin = np.array(self.map_settings_dict["origin"]).reshape(2,1) # origin: [o_x, o_y, 0.000]
         resolution = self.map_settings_dict["resolution"]
 
-        # 1. Translate and Scale
+        # Translate and Scale
         grid_coords = np.floor((point-origin) / resolution).astype(int)
 
         # grid_coords[0] is 'x' (column index)
         # grid_coords[1] is 'y' (row index)
 
-        # 2. Axis Inversion
+        # Axis Inversion
         rows = (self.map_shape[0] - 1) - grid_coords[1,:] # ?
         cols = grid_coords[0,:]
 
-        #3. Stack as [row, col]
+        # Stack as [row, col]
         cell_indices = np.column_stack((rows, cols))
 
         return cell_indices
@@ -163,13 +230,13 @@ class PathPlanner:
         # get values from map settings
         resolution = self.map_settings_dict["resolution"]
 
-        # 1. Convert world points to map cells
+        # Convert world points to map cells
         cells = self.point_to_cell(points)
 
-        # 2. Convert robot radius using resolution
+        # Convert robot radius using resolution
         robot_radius = self.robot_radius / resolution
 
-        # 3. Use disk function to find circles
+        # Use disk function to find circles
         footprint_rows = []
         footprint_cols = []
 
