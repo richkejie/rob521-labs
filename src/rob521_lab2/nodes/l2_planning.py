@@ -117,16 +117,72 @@ class PathPlanner:
         return np.zeros((3, self.num_substeps))
     
     def point_to_cell(self, point):
-        #Convert a series of [x,y] points in the map to the indices for the corresponding cell in the occupancy map
-        #point is a 2 by N matrix of points of interest
-        print("TO DO: Implement a method to get the map cell the robot is currently occupying")
-        return 0
+        """
+        Convert a series of [x,y] points in the map to the indices for the corresponding cell in the occupancy map
+        
+        Args:
+            point (np.ndarray): An 2 x N matrix of points of interest, where N is the number of points.
+
+        Returns:
+            np.ndarray: An array of cell indices [row,col] in the occupancy map corresponding to each input point.
+        """
+        assert point.ndim == 2
+        assert point.shape[0] == 2
+
+        # get values from map settings
+        origin = np.array(self.map_settings_dict["origin"]).reshape(2,1) # origin: [o_x, o_y, 0.000]
+        resolution = self.map_settings_dict["resolution"]
+
+        # 1. Translate and Scale
+        grid_coords = np.floor((point-origin) / resolution).astype(int)
+
+        # grid_coords[0] is 'x' (column index)
+        # grid_coords[1] is 'y' (row index)
+
+        # 2. Axis Inversion
+        rows = (self.map_shape[0] - 1) - grid_coords[1,:] # ?
+        cols = grid_coords[0,:]
+
+        #3. Stack as [row, col]
+        cell_indices = np.column_stack((rows, cols))
+
+        return cell_indices
 
     def points_to_robot_circle(self, points):
-        #Convert a series of [x,y] points to robot map footprints for collision detection
-        #Hint: The disk function is included to help you with this function
-        print("TO DO: Implement a method to get the pixel locations of the robot path")
-        return [], []
+        """
+        Convert a series of [x,y] points to robot map footprints for collision detection
+
+        Args:
+            points (np.ndarray): 2 x N matrix of [x, y] world positions.
+        Returns:
+            tuple: (list of row arrays, list of col arrays) representing the footprints.
+        """
+        assert points.ndim == 2
+        assert points.shape[0] == 2
+
+        # get values from map settings
+        resolution = self.map_settings_dict["resolution"]
+
+        # 1. Convert world points to map cells
+        cells = self.point_to_cell(points)
+
+        # 2. Convert robot radius using resolution
+        robot_radius = self.robot_radius / resolution
+
+        # 3. Use disk function to find circles
+        footprint_rows = []
+        footprint_cols = []
+
+        for i in range(cells.shape[0]):
+            row = cells[i, 0]
+            col = cells[i, 1]
+
+            rr, cc = disk((row, col), robot_radius, shape=self.map_shape)
+
+            footprint_rows.append(rr)
+            footprint_cols.append(cc)
+
+        return footprint_rows, footprint_cols
     #Note: If you have correctly completed all previous functions, then you should be able to create a working RRT function
 
     #RRT* specific functions
