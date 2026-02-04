@@ -40,7 +40,10 @@ RUN apt-get update && apt-get install -y \
     mesa-utils \
     x11-utils \
     x11-apps \
+    terminator \
+    vim \
     && rm -rf /var/lib/apt/lists/*
+
 
 # 2. Create User Matching Host
 # CRITICAL: Add to 'video' (GPU) and 'dialout' (Serial) groups
