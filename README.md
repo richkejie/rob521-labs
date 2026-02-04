@@ -30,3 +30,16 @@ If everything is working (make sure XLaunch is running), run gazebo: `roslaunch 
 ## Other Notes
 
 - In the container environment, you should see your Windows files included under
+
+## Python Virtual Environment (optional, for keeping packages organized)
+
+Assumes you are in the container environment.
+
+1.  Install pip: `sudo apt update`, `sudo apt install python3-pip`
+2.  Install venv: `sudo apt install python3.8-venv`
+3.  Provided Dockerfile builds image running Python 3.8.10 (check by running `python3 --version`)
+4.  In the location where you want to start a Python Virtual Environment, run `python3 -m venv ./venv`
+5.  Activate the venv: `source ./venv/bin/activate`
+6.  You should see `(venv)` at the start of your terminal prompt.
+7.  Now you can use pip to install python packages without adding them to your system globally.
+8.  Run `deactivate` to exit the venv.
