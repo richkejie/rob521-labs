@@ -29,7 +29,7 @@ If everything is working (make sure XLaunch is running), run gazebo: `roslaunch 
 
 ## Other Notes
 
-- In the container environment, you should see your Windows files included under /workspace/rob521_labs_mount
+- In the container environment, you should see your rob521 lab files included under /workspace/src/rob521_labs_mount
 
 ## Python Virtual Environment (optional, for keeping packages organized)
 
