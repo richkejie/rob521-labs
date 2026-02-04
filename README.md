@@ -8,6 +8,9 @@ This repo is for ROB521 Labs.
 2.  Install the Docker VSCode extension: https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-docker
 3.  Run the command in the `build_docker_file.sh` file. This builds the image (uses bash).
 4.  Run the command in the `run_docker_container.sh` file. This runs the container and opens a terminal session in that environment. You should see the repo's files mounted in the workspace.
+
+Note: For Intel/AMD graphics, replace `--gpus all` with `--device=/dev/dri:/dev/dri`
+
 5.  If you stopped the container, run `docker start -ai rob521_container` to get it running in your terminal again.
 
 ## Getting a GUI with Docker using Xming
@@ -22,7 +25,7 @@ This repo is for ROB521 Labs.
 2.  `catkin_make`
 3.  `source devel/setup.bash`
 
-If everything is working (make sure XLaunch is running), run gazebo: `roslaunch turtlebot3_gazebo turtlebot3_empty_world.launch`
+If everything is working (make sure XLaunch is running), run gazebo: `roslaunch turtlebot3_gazebo turtlebo3_empty_world.launch`
 
 ## Other Notes
 
