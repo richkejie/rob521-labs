@@ -75,6 +75,7 @@ class PathPlanner:
 
         # hyperparameters
         self.hp_duplicate_threshold = hyperparameters.get("duplicate_threshold", 0.05)
+        self.hp_rrt_search_nearby = hyperparameters.get("rrt_search_nearby", True)
         self.hp_rrt_num_to_search_nearby = hyperparameters.get("rrt_num_to_search_nearby", 100)
         self.hp_rrt_nearby_easy_bounds_size = hyperparameters.get("rrt_nearby_easy_bounds_size", 6)
         self.hp_rrt_nearby_search_reset_on_found = hyperparameters.get("rrt_nearby_search_reset_on_found", True)
@@ -85,8 +86,9 @@ class PathPlanner:
         #Get map information
         self.occupancy_map = load_map(map_filename)
         self.map_shape = self.occupancy_map.shape
-        print(self.map_shape)
         self.map_settings_dict = load_map_yaml(map_setings_filename)
+
+        self.map_name = map_filename
 
         # easy bounds
         self.outer_easy_bounds = outer_easy_bounds
@@ -117,11 +119,12 @@ class PathPlanner:
         
         #Pygame window for visualization
         if 'myhal' in map_filename:
-            size = (5*159, 5*49)
+            size = (5*49, 5*159)
         elif 'willow' in map_filename:
             size = (800,800)
         else:
             size = (1000,1000)
+        # size = (800,800)
 
         self.window = pygame_utils.PygameWindow(
             "Path Planner", 
@@ -129,6 +132,7 @@ class PathPlanner:
             self.occupancy_map.shape, 
             self.map_settings_dict, 
             self.goal_point, 
+            start_node.point[:2],
             self.stopping_dist,
             f"../maps/{map_filename}"
         )
@@ -185,7 +189,7 @@ class PathPlanner:
             node_xy = node.point[0:2, :]
             dist = np.linalg.norm(point-node_xy)
             if dist < threshold:
-                print(f"point {point[0][0]:.4f}, {point[1][0]:.4f} is a duplicate")
+                # print(f"point {point[0][0]:.4f}, {point[1][0]:.4f} is a duplicate")
                 return True
         return False
     
@@ -435,6 +439,8 @@ class PathPlanner:
 
         while True:
             #Sample map space
+            if not self.hp_rrt_search_nearby:
+                searching_nearby = False
             
             if searching_nearby and force_search_whole_map == 0:
                 point = self.sample_map_space(nearby_bounds)
@@ -454,12 +460,13 @@ class PathPlanner:
             if self.check_if_duplicate(point):
                 continue
 
-            ### SHOW POINT ###
-            self.window.add_point(
-                map_frame_point=np.array([point[0][0], point[1][0]]),
-                radius=2,
-                color=(255,0,0)
-            )
+            ## SHOW POINT ###
+            if 'myhal' in self.map_name:
+                self.window.add_point(
+                    map_frame_point=np.array([point[0][0], point[1][0]]),
+                    radius=5,
+                    color=(255,0,0)
+                )
 
             #Get the closest point
             closest_node_id = self.closest_node(point)
@@ -492,11 +499,18 @@ class PathPlanner:
                 # num_valid_points_found_in_grid[grid_num] += 1
 
                 ### SHOW POINT ###
-                self.window.add_point(
-                    map_frame_point=np.array([new_node.point[0][0], new_node.point[1][0]]),
-                    radius=2,
-                    color=(0,255,0)
-                )
+                if 'myhal' in self.map_name:
+                    self.window.add_point(
+                        map_frame_point=np.array([new_node.point[0][0], new_node.point[1][0]]),
+                        radius=5,
+                        color=(0,255,0)
+                    )
+                else:
+                    self.window.add_point(
+                        map_frame_point=np.array([new_node.point[0][0], new_node.point[1][0]]),
+                        radius=2,
+                        color=(0,255,0)
+                    )
 
                 # update parent's children list
                 new_node_id = len(self.nodes) - 1
@@ -588,10 +602,16 @@ class PathPlanner:
     def plot(self, points):
         for pt in points:
             # print(node)
-            self.window.add_point(
-                map_frame_point=pt[:2],
-                radius=2
-            )
+            if 'myhal' in self.map_name:
+                self.window.add_point(
+                    map_frame_point=pt[:2],
+                    radius=5
+                )
+            else:
+                self.window.add_point(
+                    map_frame_point=pt[:2],
+                    radius=2
+                )
 
 # ---------------------- run planners ----------------------
 
@@ -629,10 +649,11 @@ def rrt_planning_test_myhal():
     stopping_dist = 0.5 #m
 
     #RRT precursor
-    outer_easy_bounds = EasyBounds(0, 5.4, 2.2, 2.3)
+    outer_easy_bounds = EasyBounds(-0.1, -0.1, 2.3, 7.5)
 
     hyperparameters = {
-        "duplicate_threshold": 0.05, # m
+        "duplicate_threshold": 0.01, # m
+        "rrt_search_nearby": False,
         "rrt_num_to_search_nearby": 60,
         "rrt_nearby_easy_bounds_size": 4,
         "rrt_nearby_search_reset_on_found": True,
@@ -642,30 +663,12 @@ def rrt_planning_test_myhal():
     }
 
     bottleneck_bounds = []
-    
-    # bottleneck_bounds.append(EasyBounds(0, -0.5, 14, 1.5))
-
-    # bottleneck_bounds.append(EasyBounds(26, 0, 2.5, 5))
-    # bottleneck_bounds.append(EasyBounds(26, -16, 2.5, 7))
-    # bottleneck_bounds.append(EasyBounds(26, -23, 2.5, 7))
-    # bottleneck_bounds.append(EasyBounds(26, -30, 2.5, 7))
-    # bottleneck_bounds.append(EasyBounds(26, -37, 2.5, 7))
-    # bottleneck_bounds.append(EasyBounds(26, -39, 4, 2))
-
-    # bottleneck_bounds.append(EasyBounds(30, -40.5, 7, 2.5))
-    # bottleneck_bounds.append(EasyBounds(30, -43, 7, 2.5))
-    # bottleneck_bounds.append(EasyBounds(32, -45.5, 7, 2.5))
-    # bottleneck_bounds.append(EasyBounds(39, -44, 3, 1))
-
-    # bottleneck_bounds.append(EasyBounds(28.5, -23.5, 6, 2))
-    # bottleneck_bounds.append(EasyBounds(32, -29, 2, 5.5))
-
 
     path_planner = PathPlanner(
         map_filename, 
         map_setings_filename, 
         goal_point, 
-        Node(np.array([0.1,5.5,0]).reshape((3,1)), -1, 0),
+        Node(np.array([0,0,0]).reshape((3,1)), -1, 0),
         stopping_dist, 
         outer_easy_bounds, 
         hyperparameters,
@@ -677,8 +680,12 @@ def rrt_planning_test_myhal():
     #Leftover test functions
     np.save("myhal_path.npy", node_path_metric)
 
-    while True:
-        pass
+    # draw found path
+    points = np.load("myhal_path.npy").T
+    path_planner.plot(points)
+
+    path_planner.window.save_img("myhal_rrt.png")
+
 
 def rrt_planning_test_willow():
     #Set map information
@@ -704,23 +711,12 @@ def rrt_planning_test_willow():
 
     bottleneck_bounds = []
     
-    # bottleneck_bounds.append(EasyBounds(0, -0.5, 14, 1.5))
-
-    # bottleneck_bounds.append(EasyBounds(26, 0, 2.5, 5))
-    # bottleneck_bounds.append(EasyBounds(26, -16, 2.5, 7))
-    # bottleneck_bounds.append(EasyBounds(26, -23, 2.5, 7))
-    # bottleneck_bounds.append(EasyBounds(26, -30, 2.5, 7))
-    # bottleneck_bounds.append(EasyBounds(26, -37, 2.5, 7))
     bottleneck_bounds.append(EasyBounds(24, -41, 6, 4))
 
     bottleneck_bounds.append(EasyBounds(30, -40.5, 7, 2.5))
     bottleneck_bounds.append(EasyBounds(30, -43, 7, 2.5))
     bottleneck_bounds.append(EasyBounds(32, -45.5, 7, 2.5))
     bottleneck_bounds.append(EasyBounds(39, -44, 3, 1))
-
-    # bottleneck_bounds.append(EasyBounds(28.5, -23.5, 6, 2))
-    # bottleneck_bounds.append(EasyBounds(32, -29, 2, 5.5))
-
 
     path_planner = PathPlanner(
         map_filename, 
@@ -737,6 +733,12 @@ def rrt_planning_test_willow():
 
     #Leftover test functions
     np.save("will_path.npy", node_path_metric)
+
+    # draw found path
+    points = np.load("will_path.npy").T
+    path_planner.plot(points)
+
+    path_planner.window.save_img("willow_rrt.png")
 
 # --------------------- debuggers ---------------------
 def print_nodes(nodes):
@@ -796,8 +798,7 @@ def visualize_rrt_planning_willow():
 
     path_planner.plot(points)
 
-    while True:
-        pass
+    path_planner.window.save_img("willow_rrt_soln.png")
 
 if __name__ == '__main__':
 
