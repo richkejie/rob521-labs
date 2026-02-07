@@ -388,8 +388,6 @@ class PathPlanner:
             if self.check_if_duplicate(point):
                 continue
 
-            print(f"iter {iter}")
-
             ### SHOW POINT ###
             self.window.add_point(
                 map_frame_point=np.array([point[0][0], point[1][0]]),
@@ -460,10 +458,11 @@ class PathPlanner:
                          0
                     )
                 if searching_nearby:
-                    collision_reduce_nearby_factor += 1
+                    collision_reduce_nearby_factor += 3
                 else:
-                    collision_reduce_nearby_factor = 1
+                    collision_reduce_nearby_factor = max(1, collision_reduce_nearby_factor-1)
 
+            print(f"iter {iter}; {'valid' if not collision_detected else 'collision'}; searching {'nearby' if searching_nearby else 'whole map'}")
             iter += 1
 
     def rrt_star_planning(self):
@@ -543,8 +542,8 @@ def rrt_planning_test():
 
     hyperparameters = {
         "duplicate_threshold": 0.05, # m
-        "rrt_num_to_search_nearby": 100,
-        "rrt_nearby_easy_bounds_size": 4,
+        "rrt_num_to_search_nearby": 80,
+        "rrt_nearby_easy_bounds_size": 6,
         "rrt_nearby_search_reset_on_found": True,
         "rrt_collision_reduce_nearby_search": 2,
         "ctrl_kpv": 1,
