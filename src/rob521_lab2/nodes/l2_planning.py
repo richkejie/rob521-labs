@@ -44,6 +44,10 @@ class EasyBounds:
         return np.array([self.x + self.width, self.y + self.height])
     def top_left(self):
         return np.array([self.x, self.y + self.height])
+    def in_bounds(self, point):
+        x = point[0][0]
+        y = point[1][0]
+        return (self.x <= x <= self.x+self.width) and (self.y <= y <= self.y+self.height)
 
 #Node for building a graph
 class Node:
@@ -57,7 +61,15 @@ class Node:
 #Path Planner 
 class PathPlanner:
     #A path planner capable of perfomring RRT and RRT*
-    def __init__(self, map_filename, map_setings_filename, goal_point, stopping_dist, outer_easy_bounds, hyperparameters={}):
+    def __init__(self, 
+                 map_filename, 
+                 map_setings_filename, 
+                 goal_point, 
+                 stopping_dist, 
+                 outer_easy_bounds, 
+                 hyperparameters={},
+                 bottleneck_bounds=[]
+        ):
 
         # hyperparameters
         self.hp_duplicate_threshold = hyperparameters.get("duplicate_threshold", 0.05)
@@ -75,6 +87,7 @@ class PathPlanner:
 
         # easy bounds
         self.outer_easy_bounds = outer_easy_bounds
+        self.bottleneck_bounds = bottleneck_bounds
 
         #Robot information
         self.robot_radius = 0.22 #m
@@ -105,6 +118,8 @@ class PathPlanner:
         
         # draw easy bounds
         self.draw_easy_bounds(self.outer_easy_bounds)
+        for easy_bound in self.bottleneck_bounds:
+            self.draw_easy_bounds(easy_bound)
 
         return
 
@@ -153,7 +168,7 @@ class PathPlanner:
             node_xy = node.point[0:2, :]
             dist = np.linalg.norm(point-node_xy)
             if dist < threshold:
-                print(f"point {point} is a duplicate")
+                print(f"point {point[0][0]:.4f}, {point[1][0]:.4f} is a duplicate")
                 return True
         return False
     
@@ -343,13 +358,38 @@ class PathPlanner:
         card_V = len(self.nodes)
         return min(self.gamma_RRT * (np.log(card_V) / card_V ) ** (1.0/2.0), self.epsilon)
     
-    def connect_node_to_point(self, node_i, point_f):
+    def connect_node_to_point(self, point_i, point_f):
         #Given two nodes find the non-holonomic path that connects them
         #Settings
         #node is a 3 by 1 node
         #point is a 2 by 1 point
-        print("TO DO: Implement a way to connect two already existing nodes (for rewiring).")
-        return np.zeros((3, self.num_substeps))
+        # print("TO DO: Implement a way to connect two already existing nodes (for rewiring).")
+        # return np.zeros((3, self.num_substeps))
+
+        """
+        Given two nodes, fund non-holonomic path that connects them exactly
+        over self.timestep
+
+        Args:
+            point_i (np.ndarray): 3x1 starting point [x; y; theta]
+            point_f (np.ndarray): 2x1 target point [x; y]
+        Returns:
+            np.ndarray: 3xnum_substeps matrix of the trajectory
+                        or None if the required velocities are too high
+        """
+
+        # displacements
+        dx = point_f[0,0] - point_i[0,0]
+        dy = point_f[1,0] - point_i[1,0]
+
+        dist = np.sqrt(dx**2, dy**2)
+
+        # required heading change
+        desired_theta = np.arctan(dy, dx)
+        angle_err = desired_theta - point_i[2,0]
+
+
+
     
     def cost_to_come(self, trajectory_o):
         #The cost to get to a node from lavalle 
@@ -366,6 +406,7 @@ class PathPlanner:
 
         iter = 0
         iter_nearby = 0
+        iter_nearby_total = 0
         num_to_search_nearby = self.hp_rrt_num_to_search_nearby
         nearby_bounds_size = self.hp_rrt_nearby_easy_bounds_size
         searching_nearby = False
@@ -373,16 +414,24 @@ class PathPlanner:
 
         collision_reduce_nearby_factor = 1
 
+        force_search_whole_map = 0
+
         while True:
             #Sample map space
             
-            if searching_nearby:
+            if searching_nearby and force_search_whole_map == 0:
                 point = self.sample_map_space(nearby_bounds)
                 iter_nearby += 1
+                iter_nearby_total += 1
                 if iter_nearby >= num_to_search_nearby:
                     searching_nearby = False
+                elif iter_nearby_total >= 800: # hard cutoff
+                    searching_nearby = False
+                    iter_nearby_total = 0
+                    force_search_whole_map = 50
             else:
                 point = self.sample_map_space(self.outer_easy_bounds)
+                force_search_whole_map = max(0, force_search_whole_map-1)
 
             # check if duplicate
             if self.check_if_duplicate(point):
@@ -449,6 +498,11 @@ class PathPlanner:
                         nearby_bounds_size,
                         nearby_bounds_size
                     )
+                    if np.random.rand() < 0.75:
+                        for easy_bounds in self.bottleneck_bounds:
+                            if easy_bounds.in_bounds(new_point[0:2]):
+                                nearby_bounds = easy_bounds
+                                break
                     searching_nearby = True
                     iter_nearby = 0
             else:
@@ -457,8 +511,12 @@ class PathPlanner:
                         (iter_nearby + self.hp_rrt_collision_reduce_nearby_search)*collision_reduce_nearby_factor, 
                          0
                     )
+                    iter_nearby_total = min(
+                        (iter_nearby_total + self.hp_rrt_collision_reduce_nearby_search)*collision_reduce_nearby_factor, 
+                         0
+                    )
                 if searching_nearby:
-                    collision_reduce_nearby_factor += 3
+                    collision_reduce_nearby_factor += 2
                 else:
                     collision_reduce_nearby_factor = max(1, collision_reduce_nearby_factor-1)
 
@@ -542,15 +600,43 @@ def rrt_planning_test():
 
     hyperparameters = {
         "duplicate_threshold": 0.05, # m
-        "rrt_num_to_search_nearby": 80,
-        "rrt_nearby_easy_bounds_size": 6,
+        "rrt_num_to_search_nearby": 60,
+        "rrt_nearby_easy_bounds_size": 4,
         "rrt_nearby_search_reset_on_found": True,
         "rrt_collision_reduce_nearby_search": 2,
-        "ctrl_kpv": 1,
-        "ctrl_kpw": 1
+        "ctrl_kpv": 0.8,
+        "ctrl_kpw": 4
     }
 
-    path_planner = PathPlanner(map_filename, map_setings_filename, goal_point, stopping_dist, outer_easy_bounds, hyperparameters)
+    bottleneck_bounds = []
+    
+    # bottleneck_bounds.append(EasyBounds(0, -0.5, 14, 1.5))
+
+    bottleneck_bounds.append(EasyBounds(26, 0, 2.5, 5))
+    bottleneck_bounds.append(EasyBounds(26, -16, 2.5, 7))
+    bottleneck_bounds.append(EasyBounds(26, -23, 2.5, 7))
+    bottleneck_bounds.append(EasyBounds(26, -30, 2.5, 7))
+    bottleneck_bounds.append(EasyBounds(26, -37, 2.5, 7))
+    bottleneck_bounds.append(EasyBounds(26, -39, 4, 2))
+
+    bottleneck_bounds.append(EasyBounds(30, -40.5, 7, 2.5))
+    bottleneck_bounds.append(EasyBounds(30, -43, 7, 2.5))
+    bottleneck_bounds.append(EasyBounds(32, -45.5, 7, 2.5))
+    bottleneck_bounds.append(EasyBounds(39, -44, 3, 1))
+
+    bottleneck_bounds.append(EasyBounds(28.5, -23.5, 6, 2))
+    bottleneck_bounds.append(EasyBounds(32, -29, 2, 5.5))
+
+
+    path_planner = PathPlanner(
+        map_filename, 
+        map_setings_filename, 
+        goal_point, 
+        stopping_dist, 
+        outer_easy_bounds, 
+        hyperparameters,
+        bottleneck_bounds
+    )
     nodes = path_planner.rrt_planning()
     node_path_metric = np.hstack(path_planner.recover_path())
 
