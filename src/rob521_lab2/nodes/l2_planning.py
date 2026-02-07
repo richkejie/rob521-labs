@@ -60,9 +60,11 @@ class PathPlanner:
     def __init__(self, map_filename, map_setings_filename, goal_point, stopping_dist, outer_easy_bounds, hyperparameters={}):
 
         # hyperparameters
+        self.hp_duplicate_threshold = hyperparameters.get("duplicate_threshold", 0.05)
         self.hp_rrt_num_to_search_nearby = hyperparameters.get("rrt_num_to_search_nearby", 100)
         self.hp_rrt_nearby_easy_bounds_size = hyperparameters.get("rrt_nearby_easy_bounds_size", 6)
         self.hp_rrt_nearby_search_reset_on_found = hyperparameters.get("rrt_nearby_search_reset_on_found", True)
+        self.hp_rrt_collision_reduce_nearby_search = hyperparameters.get("rrt_collision_reduce_nearby_search", 0)
         self.hp_ctrl_kpv = hyperparameters.get("ctrl_kpv", 1)
         self.hp_ctrl_kpw = hyperparameters.get("ctrl_kpw", 1)
 
@@ -125,7 +127,7 @@ class PathPlanner:
         # goal biasing (will help converge faster)
         # 5% of the time, try to go straight to the goal
         if GOAL_BIASING:
-            if np.random.rand() < 0.05:
+            if np.random.rand() < 0.01:
                 return self.goal_point
         
         # # regular random sampling
@@ -137,7 +139,7 @@ class PathPlanner:
 
         return sampled_point
     
-    def check_if_duplicate(self, point, threshold=0.05):
+    def check_if_duplicate(self, point):
         """
         Check if point is a duplicate of an already existing node (or close enough).
         
@@ -146,6 +148,7 @@ class PathPlanner:
         Returns:
             bool: True if a node already exists within a small threshold
         """
+        threshold = self.hp_duplicate_threshold
         for node in self.nodes:
             node_xy = node.point[0:2, :]
             dist = np.linalg.norm(point-node_xy)
@@ -448,6 +451,9 @@ class PathPlanner:
                     )
                     searching_nearby = True
                     iter_nearby = 0
+            else:
+                if self.hp_rrt_collision_reduce_nearby_search > 0:
+                    iter_nearby = min(iter_nearby + self.hp_rrt_collision_reduce_nearby_search, 0)
 
             iter += 1
 
@@ -527,11 +533,13 @@ def rrt_planning_test():
         raise ValueError("Unknown map")
 
     hyperparameters = {
-        "rrt_num_to_search_nearby": 50,
+        "duplicate_threshold": 0.05, # m
+        "rrt_num_to_search_nearby": 100,
         "rrt_nearby_easy_bounds_size": 4,
         "rrt_nearby_search_reset_on_found": True,
-        "ctrl_kpv": 1.5,
-        "ctrl_kpw": 1.5
+        "rrt_collision_reduce_nearby_search": 2,
+        "ctrl_kpv": 1,
+        "ctrl_kpw": 1
     }
 
     path_planner = PathPlanner(map_filename, map_setings_filename, goal_point, stopping_dist, outer_easy_bounds, hyperparameters)
