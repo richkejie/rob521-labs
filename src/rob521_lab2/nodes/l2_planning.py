@@ -78,215 +78,55 @@ class PathPlanner:
         return
 
     #Functions required for RRT
-    def sample_map_space(self, GOAL_BIASING=True):
-        """
-        Return an [x, y] coordinate to drive the robot towards.
-        Samples randomly within the map bounds, with a 5% chance to sample the goal.
-        
-        Returns:
-            np.ndarray: 2 x 1 vector [x; y]
-        """
-
-        # goal biasing (will help converge faster)
-        # 5% of the time, try to go straight to the goal
-        if GOAL_BIASING:
-            if np.random.rand() < 0.05:
-                return self.goal_point
-        
-        # regular random sampling
-        random_x = np.random.uniform(self.bounds[0,0], self.bounds[0,1])
-        random_y = np.random.uniform(self.bounds[1,0], self.bounds[1,1])
-
-        return np.array([[random_x], [random_y]])
+    def sample_map_space(self):
+        #Return an [x,y] coordinate to drive the robot towards
+        print("TO DO: Sample point to drive towards")
+        return np.zeros((2, 1))
     
-    def check_if_duplicate(self, point, threshold=0.05):
-        """
-        Check if point is a duplicate of an already existing node (or close enough).
-        
-        Args:
-            point (np.ndarray): 2 x 1 vector [x; y]
-        Returns:
-            bool: True if a node already exists within a small threshold
-        """
-        for node in self.nodes:
-            node_xy = node.point[0:2, :]
-            dist = np.linalg.norm(point-node_xy)
-            if dist < threshold:
-                return True
+    def check_if_duplicate(self, point):
+        #Check if point is a duplicate of an already existing node
+        print("TO DO: Check that nodes are not duplicates")
         return False
     
     def closest_node(self, point):
-        """
-        Returns the index of the closest node in the tree to the sampled point.
-        
-        Args:
-            point (np.ndarray): 2 x 1 vector [x; y]
-        Returns:
-            int: The index of the closest node in self.nodes
-        """
-        all_nodes_xy = np.hstack([node.point[0:2,:] for node in self.nodes])
-        diff = all_nodes_xy - point # numpy broadcast
-        dists = np.linalg.norm(diff, axis=0)
-        closest_idx = np.argmin(dists)
-        return int(closest_idx)
+        #Returns the index of the closest node
+        print("TO DO: Implement a method to get the closest node to a sapled point")
+        return 0
     
     def simulate_trajectory(self, node_i, point_s):
-        """
-        Simulates the non-holonomic motion of the robot from node_i towards point_s.
-        
-        Args:
-            node_i (np.ndarray): 3 by 1 vector [x; y; theta] (the starting pose)
-            point_s (np.ndarray): 2 by 1 vector [x; y] (the sampled point)
-            
-        Returns:
-            np.ndarray: 3 x num_substeps matrix representing the robot's path
-        """
-        # Get the control inputs (v, omega) based on the current state and target
+        #Simulates the non-holonomic motion of the robot.
+        #This function drives the robot from node_i towards point_s. This function does has many solutions!
+        #node_i is a 3 by 1 vector [x;y;theta] this can be used to construct the SE(2) matrix T_{OI} in course notation
+        #point_s is the sampled point vector [x; y]
+        print("TO DO: Implment a method to simulate a trajectory given a sampled point")
         vel, rot_vel = self.robot_controller(node_i, point_s)
 
-        # Roll out the trajectory starting from the current node's pose
-        # We pass node_i as the x0 starting point
-        robot_traj = self.trajectory_rollout(vel, rot_vel, x0=node_i)
-        
+        robot_traj = self.trajectory_rollout(vel, rot_vel)
         return robot_traj
     
     def robot_controller(self, node_i, point_s):
-        """
-        Determines the velocities to move the robot from node_i towards point_s.
-        
-        Args:
-            node_i (np.ndarray): 3 x 1 vector [x; y; theta] (current pose)
-            point_s (np.ndarray): 2 x 1 vector [x; y] (target point)
-        Returns:
-            tuple: (vel, rot_vel) clamped by max limits
-        """
-        # Calculate distance and angle to the target
-        dx = point_s[0, 0] - node_i[0, 0]
-        dy = point_s[1, 0] - node_i[1, 0]
-
-        dist_to_target = np.sqrt(dx**2 + dy**2)
-        angle_to_target = np.arctan2(dy, dx)
-
-        # Calculate heading error
-        angle_err = angle_to_target - node_i[2, 0]
-        # confine angle fix to within [-180, 180]:
-        angle_err = np.arctan2(np.sin(angle_err), np.cos(angle_err))
-
-        # simple proportional control
-        kp_v = 1
-        kp_w = 4
-
-        vel = kp_v * dist_to_target
-        rot_vel = kp_w * angle_err
-
-        # enforce max velocities
-        vel = np.clip(vel, -self.vel_max, self.vel_max)
-        rot_vel = np.clip(rot_vel, -self.rot_vel_max, self.rot_vel_max)
-
-        return vel, rot_vel
+        #This controller determines the velocities that will nominally move the robot from node i to node s
+        #Max velocities should be enforced
+        print("TO DO: Implement a control scheme to drive you towards the sampled point")
+        return 0, 0
     
-    def trajectory_rollout(self, vel, rot_vel, x0=np.zeros((3,1))):
-        """
-        Given chosen velocities, determine the trajectory of the robot 
-        for the given timestep using the unicycle model.
-        
-        Args:
-            vel (float): Linear velocity (m/s)
-            rot_vel (float): Angular velocity (rad/s)
-        Returns:
-            np.ndarray: 3 x num_substeps matrix of [x; y; theta] points
-        """
-        # dt is time increment for each substep
-        dt = self.timestep / self.num_substeps
-
-        # initialize trajectory array
-        trajectory = np.zeros((3, self.num_substeps))
-
-        # starting values
-        curr_x = x0[0,0]
-        curr_y = x0[1,0]
-        curr_theta = x0[2,0]
-
-        for i in range(self.num_substeps):
-            # unicycle kinematic model:
-            # x_dot = v * cos(theta)
-            # y_dot = v * sin(theta)
-            # theta_dot = omega
-            curr_x += vel * np.cos(curr_theta) * dt
-            curr_y += vel * np.sin(curr_theta) * dt
-            curr_theta += rot_vel * dt
-
-            trajectory[:, i] = [curr_x, curr_y, curr_theta]
-
-        return trajectory
+    def trajectory_rollout(self, vel, rot_vel):
+        # Given your chosen velocities determine the trajectory of the robot for your given timestep
+        # The returned trajectory should be a series of points to check for collisions
+        print("TO DO: Implement a way to rollout the controls chosen")
+        return np.zeros((3, self.num_substeps))
     
     def point_to_cell(self, point):
-        """
-        Convert a series of [x,y] points in the map to the indices for the corresponding cell in the occupancy map
-        
-        Args:
-            point (np.ndarray): An 2 x N matrix of points of interest, where N is the number of points.
-
-        Returns:
-            np.ndarray: An array of cell indices [row,col] in the occupancy map corresponding to each input point.
-        """
-        assert point.ndim == 2
-        assert point.shape[0] == 2
-
-        # get values from map settings
-        origin = np.array(self.map_settings_dict["origin"]).reshape(2,1) # origin: [o_x, o_y, 0.000]
-        resolution = self.map_settings_dict["resolution"]
-
-        # Translate and Scale
-        grid_coords = np.floor((point-origin) / resolution).astype(int)
-
-        # grid_coords[0] is 'x' (column index)
-        # grid_coords[1] is 'y' (row index)
-
-        # Axis Inversion
-        rows = (self.map_shape[0] - 1) - grid_coords[1,:] # ?
-        cols = grid_coords[0,:]
-
-        # Stack as [row, col]
-        cell_indices = np.column_stack((rows, cols))
-
-        return cell_indices
+        #Convert a series of [x,y] points in the map to the indices for the corresponding cell in the occupancy map
+        #point is a 2 by N matrix of points of interest
+        print("TO DO: Implement a method to get the map cell the robot is currently occupying")
+        return 0
 
     def points_to_robot_circle(self, points):
-        """
-        Convert a series of [x,y] points to robot map footprints for collision detection
-
-        Args:
-            points (np.ndarray): 2 x N matrix of [x, y] world positions.
-        Returns:
-            tuple: (list of row arrays, list of col arrays) representing the footprints.
-        """
-        assert points.ndim == 2
-        assert points.shape[0] == 2
-
-        # get values from map settings
-        resolution = self.map_settings_dict["resolution"]
-
-        # Convert world points to map cells
-        cells = self.point_to_cell(points)
-
-        # Convert robot radius using resolution
-        robot_radius = self.robot_radius / resolution
-
-        # Use disk function to find circles
-        footprint_rows = []
-        footprint_cols = []
-
-        for i in range(cells.shape[0]):
-            row = cells[i, 0]
-            col = cells[i, 1]
-
-            rr, cc = disk((row, col), robot_radius, shape=self.map_shape)
-
-            footprint_rows.append(rr)
-            footprint_cols.append(cc)
-
-        return footprint_rows, footprint_cols
+        #Convert a series of [x,y] points to robot map footprints for collision detection
+        #Hint: The disk function is included to help you with this function
+        print("TO DO: Implement a method to get the pixel locations of the robot path")
+        return [], []
     #Note: If you have correctly completed all previous functions, then you should be able to create a working RRT function
 
     #RRT* specific functions
@@ -314,54 +154,24 @@ class PathPlanner:
         return
 
     #Planner Functions
-    def rrt_planning(self, max_iters=5000):
+    def rrt_planning(self):
         #This function performs RRT on the given map and robot
         #You do not need to demonstrate this function to the TAs, but it is left in for you to check your work
-        for i in range(max_iters):
+        for i in range(1): #Most likely need more iterations than this to complete the map!
             #Sample map space
             point = self.sample_map_space()
 
-            # check if duplicate
-            if self.check_if_duplicate(point):
-                continue
-
             #Get the closest point
             closest_node_id = self.closest_node(point)
-            closest_node = self.nodes[closest_node_id]
 
             #Simulate driving the robot towards the closest point
-            trajectory_o = self.simulate_trajectory(closest_node.point, point)
+            trajectory_o = self.simulate_trajectory(self.nodes[closest_node_id].point, point)
 
             #Check for collisions
-            footprint_rows, footprint_cols = self.points_to_robot_circle(trajectory_o[:2,:])
-
-            collision_detected = False
-            for r, c in zip(footprint_rows, footprint_cols):
-                if np.any(self.occupancy_map[r, c] == 0):
-                    collision_detected = True
-                    break
+            print("TO DO: Check for collisions and add safe points to list of nodes.")
             
-            if not collision_detected:
-                # create a new node at end of collision-free trajectory
-                new_point = trajectory_o[:, -1].reshape(3,1)
-
-                # compute cost
-                segment_dist = np.linalg.norm(new_point[0:2] - closest_node.point[0:2])
-                new_cost = closest_node.cost + segment_dist
-
-                new_node = Node(new_point, closest_node_id, new_cost)
-                self.nodes.append(new_node)
-
-                # update parent's children list
-                new_node_id = len(self.nodes) - 1
-                closest_node.children_ids.append(new_node_id)
-
-                # check if goal has been reached
-                dist_to_goal = np.linalg.norm(new_point[0:2] - self.goal_point)
-                if dist_to_goal < self.stopping_dist:
-                    print(f"Goal reached in {i} iterations!")
-                    return self.nodes
-
+            #Check if goal has been reached
+            print("TO DO: Check if at goal point.")
         return self.nodes
     
     def rrt_star_planning(self):
@@ -398,17 +208,13 @@ class PathPlanner:
         path.reverse()
         return path
 
-    ############ helpers ############
-
-
-
 def main():
     #Set map information
     map_filename = "willowgarageworld_05res.png"
     map_setings_filename = "willowgarageworld_05res.yaml"
 
     #robot information
-    goal_point = np.array([[10], [10]]) #m
+    goal_point = np.array([[42.05], [-44]]) #m
     stopping_dist = 0.5 #m
 
     #RRT precursor
@@ -420,24 +226,5 @@ def main():
     np.save("shortest_path.npy", node_path_metric)
 
 
-def rrt_planning_test():
-    #Set map information
-    map_filename = "willowgarageworld_05res.png"
-    map_setings_filename = "willowgarageworld_05res.yaml"
-
-    #robot information
-    goal_point = np.array([[10], [10]]) #m
-    stopping_dist = 0.5 #m
-
-    #RRT precursor
-    path_planner = PathPlanner(map_filename, map_setings_filename, goal_point, stopping_dist)
-    nodes = path_planner.rrt_planning()
-    node_path_metric = np.hstack(path_planner.recover_path())
-
-    #Leftover test functions
-    np.save("rrt_test_shortest_path.npy", node_path_metric)
-
 if __name__ == '__main__':
-    # main()
-
-    rrt_planning_test()
+    main()
