@@ -9,6 +9,7 @@ import matplotlib.image as mpimg
 from skimage.draw import disk
 from scipy.linalg import block_diag
 
+import argparse
 
 def load_map(filename):
     im = mpimg.imread("../maps/" + filename)
@@ -65,6 +66,7 @@ class PathPlanner:
                  map_filename, 
                  map_setings_filename, 
                  goal_point, 
+                 start_node,
                  stopping_dist, 
                  outer_easy_bounds, 
                  hyperparameters={},
@@ -83,6 +85,7 @@ class PathPlanner:
         #Get map information
         self.occupancy_map = load_map(map_filename)
         self.map_shape = self.occupancy_map.shape
+        print(self.map_shape)
         self.map_settings_dict = load_map_yaml(map_setings_filename)
 
         # easy bounds
@@ -103,7 +106,7 @@ class PathPlanner:
         self.num_substeps = 10
 
         #Planning storage
-        self.nodes = [Node(np.zeros((3,1)), -1, 0)]
+        self.nodes = [start_node]
 
         #RRT* Specific Parameters
         self.lebesgue_free = np.sum(self.occupancy_map) * self.map_settings_dict["resolution"] **2
@@ -113,8 +116,22 @@ class PathPlanner:
         self.epsilon = 2.5
         
         #Pygame window for visualization
+        if 'myhal' in map_filename:
+            size = (5*159, 5*49)
+        elif 'willow' in map_filename:
+            size = (800,800)
+        else:
+            size = (1000,1000)
+
         self.window = pygame_utils.PygameWindow(
-            "Path Planner", (1000, 1000), self.occupancy_map.shape, self.map_settings_dict, self.goal_point, self.stopping_dist)
+            "Path Planner", 
+            size, 
+            self.occupancy_map.shape, 
+            self.map_settings_dict, 
+            self.goal_point, 
+            self.stopping_dist,
+            f"../maps/{map_filename}"
+        )
         
         # draw easy bounds
         self.draw_easy_bounds(self.outer_easy_bounds)
@@ -492,13 +509,23 @@ class PathPlanner:
                     return self.nodes
                 
                 if not searching_nearby or self.hp_rrt_nearby_search_reset_on_found:
+                    x_bound = new_node.point[0][0] - nearby_bounds_size/2
+                    if x_bound < self.outer_easy_bounds.x:
+                        x_bound = self.outer_easy_bounds.x
+                    elif x_bound > self.outer_easy_bounds.x + self.outer_easy_bounds.width:
+                        x_bound = self.outer_easy_bounds.x + self.outer_easy_bounds.width - nearby_bounds_size
+                    y_bound = new_node.point[1][0] - nearby_bounds_size/2
+                    if y_bound < self.outer_easy_bounds.y:
+                        y_bound = self.outer_easy_bounds.y
+                    elif y_bound > self.outer_easy_bounds.y + self.outer_easy_bounds.height:
+                        y_bound = self.outer_easy_bounds.y + self.outer_easy_bounds.height - nearby_bounds_size
                     nearby_bounds = EasyBounds(
-                        max(new_node.point[0][0] - nearby_bounds_size/2, self.outer_easy_bounds.x),
-                        max(new_node.point[1][0] - nearby_bounds_size/2, self.outer_easy_bounds.y),
+                        x_bound,
+                        y_bound,
                         nearby_bounds_size,
                         nearby_bounds_size
                     )
-                    if np.random.rand() < 0.75:
+                    if np.random.rand() < 0.9:
                         for easy_bounds in self.bottleneck_bounds:
                             if easy_bounds.in_bounds(new_point[0:2]):
                                 nearby_bounds = easy_bounds
@@ -557,6 +584,17 @@ class PathPlanner:
         path.reverse()
         return path
 
+    # visualize
+    def plot(self, points):
+        for pt in points:
+            # print(node)
+            self.window.add_point(
+                map_frame_point=pt[:2],
+                radius=2
+            )
+
+# ---------------------- run planners ----------------------
+
 def main():
     #Set map information
     map_filename = "willowgarageworld_05res.png"
@@ -581,22 +619,17 @@ def main():
     #Leftover test functions
     np.save("shortest_path.npy", node_path_metric)
 
-def rrt_planning_test():
-    #Set map information
-    map_filename = "willowgarageworld_05res.png"
-    map_setings_filename = "willowgarageworld_05res.yaml"
+def rrt_planning_test_myhal():
+        #Set map information
+    map_filename = "myhal.png"
+    map_setings_filename = "myhal.yaml"
 
     #robot information
-    goal_point = np.array([[42.05], [-44]]) #m
+    goal_point = np.array([[0], [7]]) #m
     stopping_dist = 0.5 #m
 
     #RRT precursor
-    if "willow" in map_filename:
-            outer_easy_bounds = EasyBounds(-1, -48, 45, 58)
-    elif "myhal" in map_filename:
-        pass
-    else:
-        raise ValueError("Unknown map")
+    outer_easy_bounds = EasyBounds(0, 5.4, 2.2, 2.3)
 
     hyperparameters = {
         "duplicate_threshold": 0.05, # m
@@ -612,26 +645,27 @@ def rrt_planning_test():
     
     # bottleneck_bounds.append(EasyBounds(0, -0.5, 14, 1.5))
 
-    bottleneck_bounds.append(EasyBounds(26, 0, 2.5, 5))
-    bottleneck_bounds.append(EasyBounds(26, -16, 2.5, 7))
-    bottleneck_bounds.append(EasyBounds(26, -23, 2.5, 7))
-    bottleneck_bounds.append(EasyBounds(26, -30, 2.5, 7))
-    bottleneck_bounds.append(EasyBounds(26, -37, 2.5, 7))
-    bottleneck_bounds.append(EasyBounds(26, -39, 4, 2))
+    # bottleneck_bounds.append(EasyBounds(26, 0, 2.5, 5))
+    # bottleneck_bounds.append(EasyBounds(26, -16, 2.5, 7))
+    # bottleneck_bounds.append(EasyBounds(26, -23, 2.5, 7))
+    # bottleneck_bounds.append(EasyBounds(26, -30, 2.5, 7))
+    # bottleneck_bounds.append(EasyBounds(26, -37, 2.5, 7))
+    # bottleneck_bounds.append(EasyBounds(26, -39, 4, 2))
 
-    bottleneck_bounds.append(EasyBounds(30, -40.5, 7, 2.5))
-    bottleneck_bounds.append(EasyBounds(30, -43, 7, 2.5))
-    bottleneck_bounds.append(EasyBounds(32, -45.5, 7, 2.5))
-    bottleneck_bounds.append(EasyBounds(39, -44, 3, 1))
+    # bottleneck_bounds.append(EasyBounds(30, -40.5, 7, 2.5))
+    # bottleneck_bounds.append(EasyBounds(30, -43, 7, 2.5))
+    # bottleneck_bounds.append(EasyBounds(32, -45.5, 7, 2.5))
+    # bottleneck_bounds.append(EasyBounds(39, -44, 3, 1))
 
-    bottleneck_bounds.append(EasyBounds(28.5, -23.5, 6, 2))
-    bottleneck_bounds.append(EasyBounds(32, -29, 2, 5.5))
+    # bottleneck_bounds.append(EasyBounds(28.5, -23.5, 6, 2))
+    # bottleneck_bounds.append(EasyBounds(32, -29, 2, 5.5))
 
 
     path_planner = PathPlanner(
         map_filename, 
         map_setings_filename, 
         goal_point, 
+        Node(np.array([0.1,5.5,0]).reshape((3,1)), -1, 0),
         stopping_dist, 
         outer_easy_bounds, 
         hyperparameters,
@@ -641,10 +675,68 @@ def rrt_planning_test():
     node_path_metric = np.hstack(path_planner.recover_path())
 
     #Leftover test functions
-    np.save("path.npy", node_path_metric)
+    np.save("myhal_path.npy", node_path_metric)
 
     while True:
         pass
+
+def rrt_planning_test_willow():
+    #Set map information
+    map_filename = "willowgarageworld_05res.png"
+    map_setings_filename = "willowgarageworld_05res.yaml"
+
+    #robot information
+    goal_point = np.array([[42.05], [-44]]) #m
+    stopping_dist = 0.5 #m
+
+    #RRT precursor
+    outer_easy_bounds = EasyBounds(-1, -48, 45, 58)
+
+    hyperparameters = {
+        "duplicate_threshold": 0.05, # m
+        "rrt_num_to_search_nearby": 80,
+        "rrt_nearby_easy_bounds_size": 4,
+        "rrt_nearby_search_reset_on_found": True,
+        "rrt_collision_reduce_nearby_search": 2,
+        "ctrl_kpv": 1,
+        "ctrl_kpw": 4
+    }
+
+    bottleneck_bounds = []
+    
+    # bottleneck_bounds.append(EasyBounds(0, -0.5, 14, 1.5))
+
+    # bottleneck_bounds.append(EasyBounds(26, 0, 2.5, 5))
+    # bottleneck_bounds.append(EasyBounds(26, -16, 2.5, 7))
+    # bottleneck_bounds.append(EasyBounds(26, -23, 2.5, 7))
+    # bottleneck_bounds.append(EasyBounds(26, -30, 2.5, 7))
+    # bottleneck_bounds.append(EasyBounds(26, -37, 2.5, 7))
+    bottleneck_bounds.append(EasyBounds(24, -41, 6, 4))
+
+    bottleneck_bounds.append(EasyBounds(30, -40.5, 7, 2.5))
+    bottleneck_bounds.append(EasyBounds(30, -43, 7, 2.5))
+    bottleneck_bounds.append(EasyBounds(32, -45.5, 7, 2.5))
+    bottleneck_bounds.append(EasyBounds(39, -44, 3, 1))
+
+    # bottleneck_bounds.append(EasyBounds(28.5, -23.5, 6, 2))
+    # bottleneck_bounds.append(EasyBounds(32, -29, 2, 5.5))
+
+
+    path_planner = PathPlanner(
+        map_filename, 
+        map_setings_filename, 
+        goal_point, 
+        Node(np.zeros((3,1)), -1, 0),
+        stopping_dist, 
+        outer_easy_bounds, 
+        hyperparameters,
+        bottleneck_bounds
+    )
+    nodes = path_planner.rrt_planning()
+    node_path_metric = np.hstack(path_planner.recover_path())
+
+    #Leftover test functions
+    np.save("will_path.npy", node_path_metric)
 
 # --------------------- debuggers ---------------------
 def print_nodes(nodes):
@@ -658,11 +750,95 @@ def print_trajectory(traj):
     for i in range(traj.shape[1]):
         print(f"{traj[0][i]}, {traj[1][i]}, {traj[2][i]}")
 
+# --------------------- visualize ---------------------
+def visualize_rrt_planning_willow():
+    #Set map information
+    map_filename = "willowgarageworld_05res.png"
+    map_setings_filename = "willowgarageworld_05res.yaml"
+
+    #robot information
+    goal_point = np.array([[42.05], [-44]]) #m
+    stopping_dist = 0.5 #m
+
+    #RRT precursor
+    outer_easy_bounds = EasyBounds(-1, -48, 45, 58)
+
+    hyperparameters = {
+        "duplicate_threshold": 0.05, # m
+        "rrt_num_to_search_nearby": 80,
+        "rrt_nearby_easy_bounds_size": 4,
+        "rrt_nearby_search_reset_on_found": True,
+        "rrt_collision_reduce_nearby_search": 2,
+        "ctrl_kpv": 1,
+        "ctrl_kpw": 4
+    }
+
+    bottleneck_bounds = []
+    bottleneck_bounds.append(EasyBounds(24, -41, 6, 4))
+
+    bottleneck_bounds.append(EasyBounds(30, -40.5, 7, 2.5))
+    bottleneck_bounds.append(EasyBounds(30, -43, 7, 2.5))
+    bottleneck_bounds.append(EasyBounds(32, -45.5, 7, 2.5))
+    bottleneck_bounds.append(EasyBounds(39, -44, 3, 1))
+
+    path_planner = PathPlanner(
+        map_filename, 
+        map_setings_filename, 
+        goal_point, 
+        Node(np.zeros((3,1)), -1, 0),
+        stopping_dist, 
+        outer_easy_bounds, 
+        hyperparameters,
+        bottleneck_bounds
+    )
+
+    points = np.load("will_path.npy").T
+
+    path_planner.plot(points)
+
+    while True:
+        pass
+
 if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description="L2 Planning Script")
+
+    parser.add_argument(
+        "--map",
+        choices=["myhal", "willow"],
+        default="willow",
+        help="map choice"
+    )
+
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "-p",
+        "--plan",
+        action="store_true",
+        help="run planning"
+    )
+    group.add_argument(
+        "-v",
+        "--visualize",
+        action="store_true",
+        help="run visualization"
+    )
+
+    args = parser.parse_args()
 
     # set seed
     np.random.seed(42)
 
     # main()
 
-    rrt_planning_test()
+    if args.plan:
+        if args.map == "willow":
+            rrt_planning_test_willow()
+        elif args.map == "myhal":
+            rrt_planning_test_myhal()
+        else:
+            raise ValueError("map unknown")
+    
+    elif args.visualize:
+        if args.map == "willow":
+            visualize_rrt_planning_willow()
