@@ -371,6 +371,8 @@ class PathPlanner:
         searching_nearby = False
         nearby_bounds = None
 
+        collision_reduce_nearby_factor = 1
+
         while True:
             #Sample map space
             
@@ -453,7 +455,14 @@ class PathPlanner:
                     iter_nearby = 0
             else:
                 if self.hp_rrt_collision_reduce_nearby_search > 0:
-                    iter_nearby = min(iter_nearby + self.hp_rrt_collision_reduce_nearby_search, 0)
+                    iter_nearby = min(
+                        (iter_nearby + self.hp_rrt_collision_reduce_nearby_search)*collision_reduce_nearby_factor, 
+                         0
+                    )
+                if searching_nearby:
+                    collision_reduce_nearby_factor += 1
+                else:
+                    collision_reduce_nearby_factor = 1
 
             iter += 1
 
