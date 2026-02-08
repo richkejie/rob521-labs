@@ -70,7 +70,8 @@ class PathPlanner:
                  stopping_dist, 
                  outer_easy_bounds, 
                  hyperparameters={},
-                 bottleneck_bounds=[]
+                 bottleneck_bounds=[],
+                 obstacle_bounds = []
         ):
 
         # hyperparameters
@@ -92,7 +93,15 @@ class PathPlanner:
 
         # easy bounds
         self.outer_easy_bounds = outer_easy_bounds
+        if 'myhal' in self.map_name:
+            self.outer_easy_bounds.x = self.map_settings_dict["origin"][0]
+            self.outer_easy_bounds.y = self.map_settings_dict["origin"][1]
+            self.outer_easy_bounds.width = self.map_shape[1] * self.map_settings_dict["resolution"]
+            self.outer_easy_bounds.height = self.map_shape[0] * self.map_settings_dict["resolution"]
+
+
         self.bottleneck_bounds = bottleneck_bounds
+        self.obstacle_bounds = obstacle_bounds
 
         #Robot information
         self.robot_radius = 0.22 #m
@@ -118,13 +127,7 @@ class PathPlanner:
         self.epsilon = 2.5
         
         #Pygame window for visualization
-        if 'myhal' in map_filename:
-            size = (5*49, 5*159)
-        elif 'willow' in map_filename:
-            size = (800,800)
-        else:
-            size = (1000,1000)
-        # size = (800,800)
+        size = (800,800)
 
         self.window = pygame_utils.PygameWindow(
             "Path Planner", 
@@ -140,6 +143,8 @@ class PathPlanner:
         # draw easy bounds
         self.draw_easy_bounds(self.outer_easy_bounds)
         for easy_bound in self.bottleneck_bounds:
+            self.draw_easy_bounds(easy_bound)
+        for easy_bound in self.obstacle_bounds:
             self.draw_easy_bounds(easy_bound)
 
         return
@@ -461,12 +466,11 @@ class PathPlanner:
                 continue
 
             ## SHOW POINT ###
-            if 'myhal' in self.map_name:
-                self.window.add_point(
-                    map_frame_point=np.array([point[0][0], point[1][0]]),
-                    radius=5,
-                    color=(255,0,0)
-                )
+            self.window.add_point(
+                map_frame_point=np.array([point[0][0], point[1][0]]),
+                radius=2,
+                color=(255,0,0)
+            )
 
             #Get the closest point
             closest_node_id = self.closest_node(point)
@@ -499,18 +503,11 @@ class PathPlanner:
                 # num_valid_points_found_in_grid[grid_num] += 1
 
                 ### SHOW POINT ###
-                if 'myhal' in self.map_name:
-                    self.window.add_point(
-                        map_frame_point=np.array([new_node.point[0][0], new_node.point[1][0]]),
-                        radius=5,
-                        color=(0,255,0)
-                    )
-                else:
-                    self.window.add_point(
-                        map_frame_point=np.array([new_node.point[0][0], new_node.point[1][0]]),
-                        radius=2,
-                        color=(0,255,0)
-                    )
+                self.window.add_point(
+                    map_frame_point=np.array([new_node.point[0][0], new_node.point[1][0]]),
+                    radius=2,
+                    color=(0,255,0)
+                )
 
                 # update parent's children list
                 new_node_id = len(self.nodes) - 1
@@ -522,44 +519,46 @@ class PathPlanner:
                     print(f"Goal reached in {iter} iterations!")
                     return self.nodes
                 
-                if not searching_nearby or self.hp_rrt_nearby_search_reset_on_found:
-                    x_bound = new_node.point[0][0] - nearby_bounds_size/2
-                    if x_bound < self.outer_easy_bounds.x:
-                        x_bound = self.outer_easy_bounds.x
-                    elif x_bound > self.outer_easy_bounds.x + self.outer_easy_bounds.width:
-                        x_bound = self.outer_easy_bounds.x + self.outer_easy_bounds.width - nearby_bounds_size
-                    y_bound = new_node.point[1][0] - nearby_bounds_size/2
-                    if y_bound < self.outer_easy_bounds.y:
-                        y_bound = self.outer_easy_bounds.y
-                    elif y_bound > self.outer_easy_bounds.y + self.outer_easy_bounds.height:
-                        y_bound = self.outer_easy_bounds.y + self.outer_easy_bounds.height - nearby_bounds_size
-                    nearby_bounds = EasyBounds(
-                        x_bound,
-                        y_bound,
-                        nearby_bounds_size,
-                        nearby_bounds_size
-                    )
-                    if np.random.rand() < 0.9:
-                        for easy_bounds in self.bottleneck_bounds:
-                            if easy_bounds.in_bounds(new_point[0:2]):
-                                nearby_bounds = easy_bounds
-                                break
-                    searching_nearby = True
-                    iter_nearby = 0
+                if (self.hp_rrt_search_nearby):
+                    if not searching_nearby or self.hp_rrt_nearby_search_reset_on_found:
+                        x_bound = new_node.point[0][0] - nearby_bounds_size/2
+                        if x_bound < self.outer_easy_bounds.x:
+                            x_bound = self.outer_easy_bounds.x
+                        elif x_bound > self.outer_easy_bounds.x + self.outer_easy_bounds.width:
+                            x_bound = self.outer_easy_bounds.x + self.outer_easy_bounds.width - nearby_bounds_size
+                        y_bound = new_node.point[1][0] - nearby_bounds_size/2
+                        if y_bound < self.outer_easy_bounds.y:
+                            y_bound = self.outer_easy_bounds.y
+                        elif y_bound > self.outer_easy_bounds.y + self.outer_easy_bounds.height:
+                            y_bound = self.outer_easy_bounds.y + self.outer_easy_bounds.height - nearby_bounds_size
+                        nearby_bounds = EasyBounds(
+                            x_bound,
+                            y_bound,
+                            nearby_bounds_size,
+                            nearby_bounds_size
+                        )
+                        if np.random.rand() < 0.9:
+                            for easy_bounds in self.bottleneck_bounds:
+                                if easy_bounds.in_bounds(new_point[0:2]):
+                                    nearby_bounds = easy_bounds
+                                    break
+                        searching_nearby = True
+                        iter_nearby = 0
             else:
-                if self.hp_rrt_collision_reduce_nearby_search > 0:
-                    iter_nearby = min(
-                        (iter_nearby + self.hp_rrt_collision_reduce_nearby_search)*collision_reduce_nearby_factor, 
-                         0
-                    )
-                    iter_nearby_total = min(
-                        (iter_nearby_total + self.hp_rrt_collision_reduce_nearby_search)*collision_reduce_nearby_factor, 
-                         0
-                    )
-                if searching_nearby:
-                    collision_reduce_nearby_factor += 2
-                else:
-                    collision_reduce_nearby_factor = max(1, collision_reduce_nearby_factor-1)
+                if self.hp_rrt_search_nearby:
+                    if self.hp_rrt_collision_reduce_nearby_search > 0:
+                        iter_nearby = min(
+                            (iter_nearby + self.hp_rrt_collision_reduce_nearby_search)*collision_reduce_nearby_factor, 
+                            0
+                        )
+                        iter_nearby_total = min(
+                            (iter_nearby_total + self.hp_rrt_collision_reduce_nearby_search)*collision_reduce_nearby_factor, 
+                            0
+                        )
+                    if searching_nearby:
+                        collision_reduce_nearby_factor += 2
+                    else:
+                        collision_reduce_nearby_factor = max(1, collision_reduce_nearby_factor-1)
 
             print(f"iter {iter}; {'valid' if not collision_detected else 'collision'}; searching {'nearby' if searching_nearby else 'whole map'}")
             iter += 1
@@ -602,16 +601,10 @@ class PathPlanner:
     def plot(self, points):
         for pt in points:
             # print(node)
-            if 'myhal' in self.map_name:
-                self.window.add_point(
-                    map_frame_point=pt[:2],
-                    radius=5
-                )
-            else:
-                self.window.add_point(
-                    map_frame_point=pt[:2],
-                    radius=2
-                )
+            self.window.add_point(
+                map_frame_point=pt[:2],
+                radius=2
+            )
 
 # ---------------------- run planners ----------------------
 
@@ -638,54 +631,6 @@ def main():
 
     #Leftover test functions
     np.save("shortest_path.npy", node_path_metric)
-
-def rrt_planning_test_myhal():
-        #Set map information
-    map_filename = "myhal.png"
-    map_setings_filename = "myhal.yaml"
-
-    #robot information
-    goal_point = np.array([[0], [7]]) #m
-    stopping_dist = 0.5 #m
-
-    #RRT precursor
-    outer_easy_bounds = EasyBounds(-0.1, -0.1, 2.3, 7.5)
-
-    hyperparameters = {
-        "duplicate_threshold": 0.01, # m
-        "rrt_search_nearby": False,
-        "rrt_num_to_search_nearby": 60,
-        "rrt_nearby_easy_bounds_size": 4,
-        "rrt_nearby_search_reset_on_found": True,
-        "rrt_collision_reduce_nearby_search": 2,
-        "ctrl_kpv": 0.8,
-        "ctrl_kpw": 4
-    }
-
-    bottleneck_bounds = []
-
-    path_planner = PathPlanner(
-        map_filename, 
-        map_setings_filename, 
-        goal_point, 
-        Node(np.array([0,0,0]).reshape((3,1)), -1, 0),
-        stopping_dist, 
-        outer_easy_bounds, 
-        hyperparameters,
-        bottleneck_bounds
-    )
-    nodes = path_planner.rrt_planning()
-    node_path_metric = np.hstack(path_planner.recover_path())
-
-    #Leftover test functions
-    np.save("myhal_path.npy", node_path_metric)
-
-    # draw found path
-    points = np.load("myhal_path.npy").T
-    path_planner.plot(points)
-
-    path_planner.window.save_img("myhal_rrt.png")
-
 
 def rrt_planning_test_willow():
     #Set map information
@@ -739,6 +684,50 @@ def rrt_planning_test_willow():
     path_planner.plot(points)
 
     path_planner.window.save_img("willow_rrt.png")
+
+def rrt_planning_test_myhal():
+    #Set map information
+    map_filename = "myhal.png"
+    map_setings_filename = "myhal.yaml"
+
+    #robot information
+    goal_point = np.array([[7], [0]]) #m
+    stopping_dist = 0.5 #m
+
+    #RRT precursor
+    outer_easy_bounds = EasyBounds(0, 0, 0, 0)
+
+    hyperparameters = {
+        "duplicate_threshold": 1e-6, # m
+        "rrt_search_nearby": False,
+        "ctrl_kpv": 0.5,
+        "ctrl_kpw": 2
+    }
+
+    bottleneck_bounds = []
+
+    path_planner = PathPlanner(
+        map_filename, 
+        map_setings_filename, 
+        goal_point, 
+        Node(np.zeros((3,1)), -1, 0),
+        stopping_dist, 
+        outer_easy_bounds, 
+        hyperparameters,
+        bottleneck_bounds
+    )
+    nodes = path_planner.rrt_planning()
+    node_path_metric = np.hstack(path_planner.recover_path())
+
+    #Leftover test functions
+    np.save("myhal_path.npy", node_path_metric)
+
+    # draw found path
+    points = np.load("myhal_path.npy").T
+    path_planner.plot(points)
+
+    path_planner.window.save_img("myhal_rrt.png")
+
 
 # --------------------- debuggers ---------------------
 def print_nodes(nodes):

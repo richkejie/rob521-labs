@@ -32,8 +32,6 @@ class PygameWindow:
 
         # map_img = pygame.image.load('../maps/willowgarageworld_05res.png')
         map_img = pygame.image.load(map_img_file)
-        if 'myhal' in map_img_file:
-            map_img = pygame.transform.rotate(map_img, 90)
         map_img = pygame.transform.scale(map_img, self.size)
         
 
@@ -46,15 +44,8 @@ class PygameWindow:
         self.origin_pixels = np.array([-self.origin[0], full_map_height + self.origin[1]]) / self.meters_per_pixel
 
         self.add_se2_pose([0, 0, 0], length=5, color=COLORS['r'])
-        if 'myhal' in map_img_file:
-            self.add_point(goal_point.flatten(), radius=10, color=COLORS['g'])
-        else:
-            self.add_point(goal_point.flatten(), radius=stopping_dist / self.meters_per_pixel, color=COLORS['g'])
-
-        if 'myhal' in map_img_file:
-            self.add_point(start_point.flatten(), radius=10, color=COLORS['b'])
-        else:
-            self.add_point(start_point.flatten(), radius=stopping_dist / self.meters_per_pixel, color=COLORS['b'])
+        self.add_point(goal_point.flatten(), radius=stopping_dist / self.meters_per_pixel, color=COLORS['g'])
+        self.add_point(start_point.flatten(), radius=stopping_dist / self.meters_per_pixel, color=COLORS['b'])
 
 
     def add_point(self, map_frame_point, radius=1, width=0, color=COLORS['k']):
