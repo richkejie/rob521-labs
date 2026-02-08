@@ -17,24 +17,23 @@ from visualization_msgs.msg import Marker
 import utils
 
 
-TRANS_GOAL_TOL = .1  # m, tolerance to consider a goal complete
-ROT_GOAL_TOL = .3  # rad, tolerance to consider a goal complete
+TRANS_GOAL_TOL = .2  # m, tolerance to consider a goal complete
+ROT_GOAL_TOL = .4  # rad, tolerance to consider a goal complete
 TRANS_VEL_OPTS = [0, 0.025, 0.13, 0.26]  # m/s, max of real robot is .26
-ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 11)  # rad/s, max of real robot is 1.82
-CONTROL_RATE = 5  # Hz, how frequently control signals are sent
-CONTROL_HORIZON = 5  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
+# TRANS_VEL_OPTS = [0, 0.025, 0.15, 0.26, 0.35]
+# ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 11)  # rad/s, max of real robot is 1.82
+ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 20)
+# ROT_VEL_OPTS = np.linspace(-1.5, 1.5, 17)
+CONTROL_RATE = 15  # Hz, how frequently control signals are sent
+CONTROL_HORIZON = 3  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
 INTEGRATION_DT = .025  # s, delta t to propagate trajectories forward by
-COLLISION_RADIUS = 0.225  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
-ROT_DIST_MULT = .1  # multiplier to change effect of rotational distance in choosing correct control
-OBS_DIST_MULT = .1  # multiplier to change the effect of low distance to obstacles on a path
+COLLISION_RADIUS = 0.3  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
+ROT_DIST_MULT = 0.3  # multiplier to change effect of rotational distance in choosing correct control
+# OBS_DIST_MULT = .1  # multiplier to change the effect of low distance to obstacles on a path
+OBS_DIST_MULT = 0.2
 MIN_TRANS_DIST_TO_USE_ROT = TRANS_GOAL_TOL  # m, robot has to be within this distance to use rot distance in cost
-# PATH_NAME = 'path.npy'  # saved path from l2_planning.py, should be in the same directory as this file
+
 PATH_NAME = 'myhal_path.npy'
-
-# here are some hardcoded paths to use if you want to develop l2_planning and this file in parallel
-# TEMP_HARDCODE_PATH = [[2, 0, 0], [2.75, -1, -np.pi/2], [2.75, -4, -np.pi/2], [2, -4.4, np.pi]]  # almost collision-free
-TEMP_HARDCODE_PATH = [[2, -.5, 0], [2.4, -1, -np.pi/2], [2.45, -3.5, -np.pi/2], [1.5, -4.4, np.pi]]  # some possible collisions
-
 
 #Map Handling Functions
 def load_map(filename):
@@ -143,47 +142,105 @@ class PathFollower():
             self.update_pose()
             self.check_and_update_goal()
 
+            
             # start trajectory rollout algorithm
+            print("Propagate the trajectory forward")
             local_paths = np.zeros([self.horizon_timesteps + 1, self.num_opts, 3])
             local_paths[0] = np.atleast_2d(self.pose_in_map_np).repeat(self.num_opts, axis=0)
 
-            print("TO DO: Propogate the trajectory forward, storing the resulting points in local_paths!")
+            """
+            1) Trajectory rollout: propagate trajectory forward, storing resulting points in local_paths
+            """
+            print("1) Trajectory rollout")
             for t in range(1, self.horizon_timesteps + 1):
-                # propogate trajectory forward, assuming perfect control of velocity and no dynamic effects
-                pass
+                pose_prev = local_paths[t-1]
 
+                vel = self.all_opts[:, 0]
+                rot_vel = self.all_opts[:, 1]
+
+                local_paths[t, :, 0] = pose_prev[:, 0] + vel * np.cos(pose_prev[:, 2]) * INTEGRATION_DT
+                local_paths[t, :, 1] = pose_prev[:, 1] + vel * np.sin(pose_prev[:, 2]) * INTEGRATION_DT
+                local_paths[t, :, 2] = pose_prev[:, 2] + rot_vel * INTEGRATION_DT
+            
+
+            """
+            2) Check for collisions
+            """
             # check all trajectory points for collisions
             # first find the closest collision point in the map to each local path point
             local_paths_pixels = (self.map_origin[:2] + local_paths[:, :, :2]) / self.map_resolution
             valid_opts = range(self.num_opts)
             local_paths_lowest_collision_dist = np.ones(self.num_opts) * 50
 
-            print("TO DO: Check the points in local_path_pixels for collisions")
-            for opt in range(local_paths_pixels.shape[1]):
+            assert local_paths_pixels.shape[1] == len(valid_opts)
+            assert self.horizon_timesteps+1 == local_paths_pixels.shape[0]
+
+            print("2.1) Check the points in local_path_pixels for collisions")
+            for opt in range(self.num_opts):
                 for timestep in range(local_paths_pixels.shape[0]):
-                    pass
+                    px = local_paths_pixels[timestep, opt, 0]
+                    py = local_paths_pixels[timestep, opt, 1]
 
-            # remove trajectories that were deemed to have collisions
-            print("TO DO: Remove trajectories with collisions!")
+                    if self.map_nonzero_idxes.size > 0:
+                        dists = np.sqrt(
+                            (self.map_nonzero_idxes[:, 0] - py)**2 + (self.map_nonzero_idxes[:, 1] - px)**2
+                        )
+                        min_dist = np.min(dists)
 
+                        if min_dist < local_paths_lowest_collision_dist[opt]:
+                            local_paths_lowest_collision_dist[opt] = min_dist
+
+            print("2.2) Remove trajectories with collisions")
+            valid_opts = [opt for opt in range(self.num_opts) if local_paths_lowest_collision_dist[opt] > self.collision_radius_pix]
+
+            """
+            3) Calculate final cost and choose best control option
+            """
             # calculate final cost and choose best option
-            print("TO DO: Calculate the final cost and choose the best control option!")
-            final_cost = np.zeros(self.num_opts)
-            if final_cost.size == 0:  # hardcoded recovery if all options have collision
-                control = [-.1, 0]
+            print("3) Calculate the final cost and choose the best control option!")
+            if len(valid_opts) == 0:
+                control = [-0.1, 0] # hardcoded recover if all options infeasible
             else:
-                best_opt = valid_opts[final_cost.argmin()]
+                final_cost = []
+                for opt in valid_opts:
+                    last_pose = local_paths[-1, opt, :]
+
+                    trans_dist = np.linalg.norm(last_pose[:2] - self.cur_goal[:2])
+
+                    if trans_dist < MIN_TRANS_DIST_TO_USE_ROT:
+                        # abs_theta_diff = np.abs(last_pose[2] - self.cur_goal[2])
+                        # rot_dist = min(np.pi*2 - abs_theta_diff, abs_theta_diff)
+                        rot_error = np.arctan2(
+                            self.cur_goal[1] - last_pose[1],
+                            self.cur_goal[0] - last_pose[1]
+                        ) - last_pose[2]
+                        rot_error = (rot_error + np.pi) % (2*np.pi) - np.pi
+                        rot_dist = np.abs(rot_error)
+                    else:
+                        rot_dist = 0
+
+                    obs_pen = OBS_DIST_MULT / (local_paths_lowest_collision_dist[opt] + 0.1) # 0.1 for numerical stability
+
+                    cost = trans_dist + ROT_DIST_MULT * rot_dist + obs_pen
+                    final_cost.append(cost)
+                
+                final_cost = np.array(final_cost)
+                best_i = final_cost.argmin()
+                best_opt = valid_opts[best_i]
                 control = self.all_opts[best_opt]
-                self.local_path_pub.publish(utils.se2_pose_list_to_path(local_paths[:, best_opt], 'map'))
+                self.local_path_pub.publish(
+                    utils.se2_pose_list_to_path(local_paths[:, best_opt], "map")
+                )
 
             # send command to robot
             self.cmd_pub.publish(utils.unicyle_vel_to_twist(control))
 
             # uncomment out for debugging if necessary
-            # print("Selected control: {control}, Loop time: {time}, Max time: {max_time}".format(
-            #     control=control, time=(rospy.Time.now() - tic).to_sec(), max_time=1/CONTROL_RATE))
+            print("Selected control: {control}, Loop time: {time}, Max time: {max_time}".format(
+                control=control, time=(rospy.Time.now() - tic).to_sec(), max_time=1/CONTROL_RATE))
 
             self.rate.sleep()
+
 
     def update_pose(self):
         # Update numpy poses with current pose using the tf_buffer
