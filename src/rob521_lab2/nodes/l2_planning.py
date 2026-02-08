@@ -176,7 +176,6 @@ class PathPlanner:
         random_y = np.random.uniform(easy_bounds.y, easy_bounds.y + easy_bounds.height)
 
         sampled_point = np.array([[random_x], [random_y]])
-        # print(sampled_point)
 
         return sampled_point
     
@@ -194,7 +193,6 @@ class PathPlanner:
             node_xy = node.point[0:2, :]
             dist = np.linalg.norm(point-node_xy)
             if dist < threshold:
-                # print(f"point {point[0][0]:.4f}, {point[1][0]:.4f} is a duplicate")
                 return True
         return False
     
@@ -211,8 +209,6 @@ class PathPlanner:
         diff = all_nodes_xy - point # numpy broadcast
         dists = np.linalg.norm(diff, axis=0)
         closest_idx = np.argmin(dists)
-
-        # print(f"closest node point to {point} is {self.nodes[closest_idx].point[0:2,:]}")
 
         return int(closest_idx)
     
@@ -233,8 +229,6 @@ class PathPlanner:
         # Roll out the trajectory starting from the current node's pose
         # We pass node_i as the x0 starting point
         robot_traj = self.trajectory_rollout(vel, rot_vel, point_i=point_i)
-        
-        # print_trajectory(robot_traj)
 
         return robot_traj
     
@@ -497,7 +491,6 @@ class PathPlanner:
                 new_cost = closest_node.cost + segment_dist # cost not used for regular RRT
 
                 new_node = Node(new_point, closest_node_id, new_cost)
-                # print(new_node.point[0][0])
                 self.nodes.append(new_node)
                 
                 # num_valid_points_found_in_grid[grid_num] += 1
@@ -600,7 +593,6 @@ class PathPlanner:
     # visualize
     def plot(self, points):
         for pt in points:
-            # print(node)
             self.window.add_point(
                 map_frame_point=pt[:2],
                 radius=2
