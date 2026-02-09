@@ -16,24 +16,49 @@ from visualization_msgs.msg import Marker
 # ros and se2 conversion utils
 import utils
 
+RRT_STAR = True
 
-TRANS_GOAL_TOL = .2  # m, tolerance to consider a goal complete
-ROT_GOAL_TOL = .4  # rad, tolerance to consider a goal complete
-TRANS_VEL_OPTS = [0, 0.025, 0.13, 0.26]  # m/s, max of real robot is .26
-# TRANS_VEL_OPTS = [0, 0.025, 0.15, 0.26, 0.35]
-# ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 11)  # rad/s, max of real robot is 1.82
-ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 20)
-# ROT_VEL_OPTS = np.linspace(-1.5, 1.5, 17)
-CONTROL_RATE = 15  # Hz, how frequently control signals are sent
-CONTROL_HORIZON = 3  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
-INTEGRATION_DT = .025  # s, delta t to propagate trajectories forward by
-COLLISION_RADIUS = 0.3  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
-ROT_DIST_MULT = 0.3  # multiplier to change effect of rotational distance in choosing correct control
-# OBS_DIST_MULT = .1  # multiplier to change the effect of low distance to obstacles on a path
-OBS_DIST_MULT = 0.2
-MIN_TRANS_DIST_TO_USE_ROT = TRANS_GOAL_TOL  # m, robot has to be within this distance to use rot distance in cost
+if RRT_STAR:
+    TRANS_GOAL_TOL = .2  # m, tolerance to consider a goal complete
+    ROT_GOAL_TOL = .5  # rad, tolerance to consider a goal complete
+    TRANS_VEL_OPTS = [0, 0.025, 0.13, 0.26]  # m/s, max of real robot is .26
+    # TRANS_VEL_OPTS = [0, 0.025, 0.15, 0.26, 0.35]
+    # ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 11)  # rad/s, max of real robot is 1.82
+    ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 20)
+    # ROT_VEL_OPTS = np.linspace(-1.5, 1.5, 17)
+    CONTROL_RATE = 15  # Hz, how frequently control signals are sent
+    CONTROL_HORIZON = 3  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
+    INTEGRATION_DT = .025  # s, delta t to propagate trajectories forward by
+    COLLISION_RADIUS = 0.3  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
+    ROT_DIST_MULT = 0.2  # multiplier to change effect of rotational distance in choosing correct control
+    # OBS_DIST_MULT = .1  # multiplier to change the effect of low distance to obstacles on a path
+    OBS_DIST_MULT = 0.2
+    MIN_TRANS_DIST_TO_USE_ROT = TRANS_GOAL_TOL  # m, robot has to be within this distance to use rot distance in cost
 
-PATH_NAME = 'myhal_path.npy'
+    PATH_NAME = 'myhal_path_rrt_star.npy'
+else:
+    TRANS_GOAL_TOL = .2  # m, tolerance to consider a goal complete
+    ROT_GOAL_TOL = .4  # rad, tolerance to consider a goal complete
+    TRANS_VEL_OPTS = [0, 0.025, 0.13, 0.26]  # m/s, max of real robot is .26
+    # TRANS_VEL_OPTS = [0, 0.025, 0.15, 0.26, 0.35]
+    # ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 11)  # rad/s, max of real robot is 1.82
+    ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 20)
+    # ROT_VEL_OPTS = np.linspace(-1.5, 1.5, 17)
+    CONTROL_RATE = 15  # Hz, how frequently control signals are sent
+    CONTROL_HORIZON = 3  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
+    INTEGRATION_DT = .025  # s, delta t to propagate trajectories forward by
+    COLLISION_RADIUS = 0.3  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
+    ROT_DIST_MULT = 0.3  # multiplier to change effect of rotational distance in choosing correct control
+    # OBS_DIST_MULT = .1  # multiplier to change the effect of low distance to obstacles on a path
+    OBS_DIST_MULT = 0.2
+    MIN_TRANS_DIST_TO_USE_ROT = TRANS_GOAL_TOL  # m, robot has to be within this distance to use rot distance in cost
+
+    PATH_NAME = 'myhal_path.npy'
+
+
+
+
+
 
 #Map Handling Functions
 def load_map(filename):

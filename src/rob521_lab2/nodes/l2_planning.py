@@ -387,8 +387,8 @@ class PathPlanner:
         # return np.zeros((3, self.num_substeps))
 
         """
-        Given two nodes, fund non-holonomic path that connects them exactly
-        over self.timestep
+        Given two nodes, find non-holonomic path that connects them 
+        can ignore final heading
 
         Args:
             point_i (np.ndarray): 3x1 starting point [x; y; theta]
@@ -398,28 +398,50 @@ class PathPlanner:
                         or None if the required velocities are too high
         """
 
-        # displacements
-        dx = point_f[0,0] - point_i[0,0]
-        dy = point_f[1,0] - point_i[1,0]
+        curr_pt = point_i
+        dest_pt = point_f
 
-        dist = np.sqrt(dx**2, dy**2)
+        traj = curr_pt.reshape(3,1)
 
-        # required heading change
-        desired_theta = np.arctan(dy, dx)
-        angle_err = desired_theta - point_i[2,0]
+        while True:
+            curr_traj = self.simulate_trajectory(curr_pt, dest_pt)
 
+            footprint_rows, footprint_cols = self.points_to_robot_circle(curr_traj[:2,:])
+            for r,c in zip(footprint_rows, footprint_cols):
+                if np.any(self.occupancy_map[r,c] == 0):
+                    # collision
+                    return None
+            
+            traj_end = curr_traj[:,-1]
+            # print(traj)
+            traj = np.hstack((traj,curr_traj))
 
+            if self.stopping_dist - np.linalg.norm(traj_end[:2] - dest_pt) < 1e-6:
+                break # done!
+            else:
+                if np.any(np.not_equal(curr_pt, traj_end)):
+                    curr_pt = traj_end
+                else:
+                    return None
 
+        return traj
     
     def cost_to_come(self, trajectory_o):
-        #The cost to get to a node from lavalle 
-        print("TO DO: Implement a cost to come metric")
-        return 0
-    
-    def update_children(self, node_id):
-        #Given a node_id with a changed cost, update all connected nodes with the new cost
-        print("TO DO: Update the costs of connected nodes after rewiring.")
-        return
+
+        total_cost = 0
+        for i in range(1, len(trajectory_o)):
+            dist = np.linalg.norm(trajectory_o[i] - trajectory_o[i-1])
+            total_cost += dist
+        
+        return total_cost
+
+    def update_children(self, node_id, delta_cost):
+        node = self.nodes[node_id]
+        node.cost += delta_cost
+
+        for child_id in node.children_ids:
+            self.update_children(child_id, delta_cost) # recursively update children
+
 
     #Planner Functions
     def rrt_planning(self, max_iters=5000):
@@ -557,30 +579,116 @@ class PathPlanner:
             iter += 1
 
     def rrt_star_planning(self):
-        #This function performs RRT* for the given map and robot        
-        for i in range(1): #Most likely need more iterations than this to complete the map!
-            #Sample
-            point = self.sample_map_space()
+        while True:
+            # sample
+            new_point = self.sample_map_space(self.outer_easy_bounds)
 
-            #Closest Node
-            closest_node_id = self.closest_node(point)
+            # find closest node
+            closest_node_id = self.closest_node(new_point.reshape(2,1))
+            closest_node = self.nodes[closest_node_id]
 
-            #Simulate trajectory
-            trajectory_o = self.simulate_trajectory(self.nodes[closest_node_id].point, point)
+            # simulate trajectory
+            trajectory_o = self.connect_node_to_point(closest_node.point, new_point)
+            if trajectory_o is None: # collisions exist in trajectory
+                continue
+            trajectory_cost = self.cost_to_come(trajectory_o)
 
-            #Check for Collision
-            print("TO DO: Check for collision.")
+            # print(trajectory_o)
 
-            #Last node rewire
-            print("TO DO: Last node rewiring")
+            # add new node with costs
+            new_node = Node(
+                trajectory_o[:,-1].reshape(3,1),
+                closest_node_id,
+                closest_node.cost + trajectory_cost
+            )
+            # print(new_node.point)
+            self.nodes.append(new_node)
 
-            #Close node rewire
-            print("TO DO: Near point rewiring")
+            curr_node_id = len(self.nodes) - 1
+            curr_node = self.nodes[curr_node_id]
+            closest_node.children_ids.append(curr_node_id)
 
-            #Check for early end
-            print("TO DO: Check for early end")
-        return self.nodes
-    
+            #### show point ####
+            self.window.add_point(
+                map_frame_point=np.array([new_node.point[0][0], new_node.point[1][0]]),
+                radius=1,
+                color=(0,255,0)
+            )
+
+            # last node rewiring: treat the curr_node as a child and find the best parent
+            near_nodes = self.find_near_nodes(curr_node.point)
+            # print(near_nodes)
+            for near_node_id in near_nodes:
+                if curr_node.parent_id == near_node_id:
+                    continue # don't need to check existing connection
+
+                # print(near_node_id)
+                near_node = self.nodes[near_node_id]
+                # print(near_node.point)
+                new_trajectory = self.connect_node_to_point(near_node.point, curr_node.point[:2]) # connect near_node --> curr_node
+                if new_trajectory is None:
+                    continue # skip if there is collision
+
+                new_trajectory_cost = near_node.cost + self.cost_to_come(new_trajectory)
+                if new_trajectory_cost < curr_node.cost:
+                    curr_node.cost = new_trajectory_cost
+                    self.nodes[curr_node.parent_id].children_ids.remove(curr_node_id) # remove curr_node as a child of its parent
+                    curr_node.parent_id = near_node_id # update parent
+                    near_node.children_ids.append(curr_node_id) # add curr_node as child of the new parent
+
+            # near edge rewiring: treat curr_node as a parent and check for potential children
+            for _ in range(5):
+                near_nodes = self.find_near_nodes(curr_node.point)
+                for near_node_id in near_nodes:
+                    if self.is_parent(curr_node, near_node_id) or near_node_id == -1:
+                        continue # skip if near_node is parent of curr_node
+                    near_node = self.nodes[near_node_id]
+                    new_trajectory = self.connect_node_to_point(curr_node.point, near_node.point[:2]) # connect curr_node --> near_node
+                    if new_trajectory is None:
+                        continue # skip if there is collision
+
+                    new_trajectory_cost = curr_node.cost + self.cost_to_come(new_trajectory)
+
+                    if new_trajectory_cost < near_node.cost:
+                        delta = near_node.cost - new_trajectory_cost
+                        near_node.cost = new_trajectory_cost
+                        self.nodes[near_node.parent_id].children_ids.remove(near_node_id)
+                        near_node.parent_id = curr_node_id
+                        curr_node.children_ids.append(near_node_id)
+                        self.update_children(near_node_id, delta)
+                        curr_node = near_node
+                        curr_node_id = near_node_id
+                        break
+
+            # check for early end
+            dist_to_goal = np.sqrt((new_node.point[0] - self.goal_point[0])**2 + (new_node.point[1] - self.goal_point[1])**2)
+            if dist_to_goal <= self.stopping_dist:
+                final_node = self.nodes[-1]
+                final_trajectory = [final_node.point]
+
+                # draw graph
+                # while final_node.parent_id != -1:
+                #     final_trajectory = [self.nodes[final_node.parent_id].point] + final_trajectory
+                #     final_node = self.nodes[final_node.parent_id]
+
+                # for i, pt in enumerate(final_trajectory):
+                #     self.window.add_point(
+                #         map_frame_point=np.array([pt[0][0], pt[1][0]]),
+                #         radius=2,
+                #         color=(0,0,255)
+                #     )
+                #     if i < len(final_trajectory) - 1:
+                #         self.window.add_line(
+                #             np.array([pt[0][0], pt[1][0]]),
+                #             final_trajectory[i+1][:2],
+                #             width=1,
+                #             color=(0,0,255)
+                #         )
+                
+                return self.nodes
+
+
+
     def recover_path(self, node_id = -1):
         path = [self.nodes[node_id].point]
         current_node_id = self.nodes[node_id].parent_id
@@ -597,6 +705,27 @@ class PathPlanner:
                 map_frame_point=pt[:2],
                 radius=2
             )
+
+    # ---------------------- helpers for rrt* ----------------------
+    def find_near_nodes(self, point):
+        near_nodes = []
+        radius = self.ball_radius()
+
+        for node_id, node in enumerate(self.nodes):
+            node = self.nodes[node_id]
+            dist = float(np.linalg.norm(node.point - point))
+            if dist <= radius:
+                near_nodes.append(node_id)
+        
+        return near_nodes
+
+    def is_parent(self, node, id):
+        curr_node = node
+        while curr_node.parent_id != -1:
+            if curr_node.parent_id == id:
+                return True
+            curr_node = self.nodes[curr_node.parent_id]
+        return False
 
 # ---------------------- run planners ----------------------
 
@@ -677,7 +806,9 @@ def rrt_planning_test_willow():
 
     path_planner.window.save_img("willow_rrt.png")
 
-def rrt_planning_test_myhal():
+def rrt_planning_test_myhal(rrt_star=True):
+    print("using rrt*")
+
     #Set map information
     map_filename = "myhal.png"
     map_setings_filename = "myhal.yaml"
@@ -708,18 +839,19 @@ def rrt_planning_test_myhal():
         hyperparameters,
         bottleneck_bounds
     )
-    nodes = path_planner.rrt_planning()
+
+    if rrt_star:
+        nodes = path_planner.rrt_star_planning()
+    else:
+        nodes = path_planner.rrt_planning()
     node_path_metric = np.hstack(path_planner.recover_path())
 
     #Leftover test functions
-    np.save("myhal_path.npy", node_path_metric)
 
-    # draw found path
-    points = np.load("myhal_path.npy").T
-    path_planner.plot(points)
-
-    path_planner.window.save_img("myhal_rrt.png")
-
+    if rrt_star:
+        np.save("myhal_path_rrt_star.npy", node_path_metric)
+    else:
+        np.save("myhal_path.npy", node_path_metric)
 
 # --------------------- debuggers ---------------------
 def print_nodes(nodes):

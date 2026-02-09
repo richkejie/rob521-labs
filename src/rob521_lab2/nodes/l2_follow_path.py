@@ -192,10 +192,18 @@ class PathFollower():
                     trans_dist = np.linalg.norm(last_pose[:2] - self.cur_goal[:2])
 
                     if trans_dist < MIN_TRANS_DIST_TO_USE_ROT:
-                        abs_theta_diff = np.abs(last_pose[2] - self.cur_goal[2])
-                        rot_dist = min(np.pi*2 - abs_theta_diff, abs_theta_diff)
+                        # abs_theta_diff = np.abs(last_pose[2] - self.cur_goal[2])
+                        # rot_dist = min(np.pi*2 - abs_theta_diff, abs_theta_diff)
+                        rot_error = np.arctan2(
+                            self.cur_goal[1] - last_pose[1],
+                            self.cur_goal[0] - last_pose[1]
+                        ) - last_pose[2]
+                        rot_error = (rot_error + np.pi) % (2*np.pi) - np.pi
+                        rot_dist = np.abs(rot_error)
                     else:
                         rot_dist = 0
+
+                    print(rot_dist)
 
                     obs_pen = OBS_DIST_MULT / (local_paths_lowest_collision_dist[opt] + 0.1) # 0.1 for numerical stability
 
@@ -252,12 +260,6 @@ class PathFollower():
     def stop_robot_on_shutdown(self):
         self.cmd_pub.publish(Twist())
         rospy.loginfo("Published zero vel on shutdown.")
-
-    # ----------------- helpers -----------------
-
-
-
-
 
 if __name__ == '__main__':
     try:
