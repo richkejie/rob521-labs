@@ -19,8 +19,8 @@ import utils
 RRT_STAR = True
 
 if RRT_STAR:
-    TRANS_GOAL_TOL = .2  # m, tolerance to consider a goal complete
-    ROT_GOAL_TOL = .5  # rad, tolerance to consider a goal complete
+    TRANS_GOAL_TOL = .15  # m, tolerance to consider a goal complete
+    ROT_GOAL_TOL = 1.5  # rad, tolerance to consider a goal complete
     TRANS_VEL_OPTS = [0, 0.025, 0.13, 0.26]  # m/s, max of real robot is .26
     # TRANS_VEL_OPTS = [0, 0.025, 0.15, 0.26, 0.35]
     # ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 11)  # rad/s, max of real robot is 1.82
@@ -30,10 +30,10 @@ if RRT_STAR:
     CONTROL_HORIZON = 3  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
     INTEGRATION_DT = .025  # s, delta t to propagate trajectories forward by
     COLLISION_RADIUS = 0.3  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
-    ROT_DIST_MULT = 0.2  # multiplier to change effect of rotational distance in choosing correct control
+    ROT_DIST_MULT = 0.15  # multiplier to change effect of rotational distance in choosing correct control
     # OBS_DIST_MULT = .1  # multiplier to change the effect of low distance to obstacles on a path
-    OBS_DIST_MULT = 0.2
-    MIN_TRANS_DIST_TO_USE_ROT = TRANS_GOAL_TOL  # m, robot has to be within this distance to use rot distance in cost
+    OBS_DIST_MULT = 0.15
+    MIN_TRANS_DIST_TO_USE_ROT = 0.05 # m, robot has to be within this distance to use rot distance in cost
 
     PATH_NAME = 'myhal_path_rrt_star.npy'
 else:
@@ -132,6 +132,9 @@ class PathFollower():
 
         # to use the temp hardcoded paths above, switch the comment on the following two lines
         self.path_tuples = np.load(os.path.join(cur_dir, PATH_NAME)).T
+        print(self.path_tuples.shape)
+        self.path_tuples = np.vstack((self.path_tuples, np.array([7.15, 0, -1])))
+        print(self.path_tuples.shape)
         # self.path_tuples = np.array(TEMP_HARDCODE_PATH)
 
         self.path = utils.se2_pose_list_to_path(self.path_tuples, 'map')
@@ -140,6 +143,10 @@ class PathFollower():
         # goal
         self.cur_goal = np.array(self.path_tuples[0])
         self.cur_path_index = 0
+        print("FINAL GOAL POSITION")
+        # self.path_tuples[-1] = (7.15, 0, self.path_tuples[-1][-1])
+        print(self.path_tuples[-1])
+
 
         # trajectory rollout tools
         # self.all_opts is a Nx2 array with all N possible combinations of the t and v vels, scaled by integration dt
@@ -231,6 +238,10 @@ class PathFollower():
                     last_pose = local_paths[-1, opt, :]
 
                     trans_dist = np.linalg.norm(last_pose[:2] - self.cur_goal[:2])
+                    # if trans_dist < 0.5:
+                    #     ROT_DIST_MULT = 0.5
+                    # else:
+                    #     ROT_DIST_MULT = 0.3
 
                     if trans_dist < MIN_TRANS_DIST_TO_USE_ROT:
                         # abs_theta_diff = np.abs(last_pose[2] - self.cur_goal[2])
@@ -282,6 +293,15 @@ class PathFollower():
         dist_from_goal = np.linalg.norm(self.pose_in_map_np[:2] - self.cur_goal[:2])
         abs_angle_diff = np.abs(self.pose_in_map_np[2] - self.cur_goal[2])
         rot_dist_from_goal = min(np.pi * 2 - abs_angle_diff, abs_angle_diff)
+
+        if self.cur_path_index == len(self.path_tuples) - 1:
+            global TRANS_GOAL_TOL
+            global ROT_GOAL_TOL
+            TRANS_GOAL_TOL = .05  # m, tolerance to consider a goal complete
+            ROT_GOAL_TOL = 10 
+            print("TRACKING FINAL WAYPOINT, CHANGING TOLERANCES")
+
+
         if dist_from_goal < TRANS_GOAL_TOL and rot_dist_from_goal < ROT_GOAL_TOL:
             rospy.loginfo("Goal {goal} at {pose} complete.".format(
                     goal=self.cur_path_index, pose=self.cur_goal))
