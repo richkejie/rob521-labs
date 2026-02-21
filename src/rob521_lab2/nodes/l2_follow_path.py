@@ -17,20 +17,23 @@ from visualization_msgs.msg import Marker
 import utils
 
 
-TRANS_GOAL_TOL = .1  # m, tolerance to consider a goal complete
-ROT_GOAL_TOL = .3  # rad, tolerance to consider a goal complete
-TRANS_VEL_OPTS = [0, 0.025, 0.13, 0.26]  # m/s, max of real robot is .26
-ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 11)  # rad/s, max of real robot is 1.82
-CONTROL_RATE = 5  # Hz, how frequently control signals are sent
-CONTROL_HORIZON = 5  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
+TRANS_GOAL_TOL = .4  # m, tolerance to consider a goal complete
+ROT_GOAL_TOL = 1.5  # rad, tolerance to consider a goal complete
+TRANS_VEL_OPTS = [0, 0.08, 0.15]  # m/s, max of real robot is .26
+ROT_VEL_OPTS = np.linspace(-1.6, 1.6, 17)  # rad/s, max of real robot is 1.82
+CONTROL_RATE = 10  # Hz, how frequently control signals are sent
+CONTROL_HORIZON = 2  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
 INTEGRATION_DT = .025  # s, delta t to propagate trajectories forward by
-COLLISION_RADIUS = 0.225  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
-ROT_DIST_MULT = .1  # multiplier to change effect of rotational distance in choosing correct control
-OBS_DIST_MULT = .1  # multiplier to change the effect of low distance to obstacles on a path
+COLLISION_RADIUS = 0.31  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
+ROT_DIST_MULT = .3  # multiplier to change effect of rotational distance in choosing correct control
+CUMUL_ROT_DIST_MULT = .33
+FOLLOW_DIST_MULT = .2
+OBS_DIST_MULT = .12  # multiplier to change the effect of low distance to obstacles on a path
 MIN_TRANS_DIST_TO_USE_ROT = TRANS_GOAL_TOL  # m, robot has to be within this distance to use rot distance in cost
 # PATH_NAME = 'path.npy'  # saved path from l2_planning.py, should be in the same directory as this file
 # PATH_NAME = 'will_path.npy'
-PATH_NAME = 'path_complete.npy'
+# PATH_NAME = 'path_complete.npy'
+PATH_NAME = 'will_path_rrt_star.npy'
 
 # here are some hardcoded paths to use if you want to develop l2_planning and this file in parallel
 # TEMP_HARDCODE_PATH = [[2, 0, 0], [2.75, -1, -np.pi/2], [2.75, -4, -np.pi/2], [2, -4.4, np.pi]]  # almost collision-free
@@ -93,6 +96,15 @@ class PathFollower():
         self.path_tuples = np.load(os.path.join(cur_dir, PATH_NAME)).T
         # self.path_tuples = np.array(TEMP_HARDCODE_PATH)
 
+        self.path_tuples[9][0] = 11.6
+        self.path_tuples[11][0] = 11.6
+        self.path_tuples[22][0] = 4.4
+        self.path_tuples[23][0] = 4
+        self.path_tuples[24][0] = 4
+        self.path_tuples[34][0] = 26.5
+        self.path_tuples[35][0] = 27
+        self.path_tuples[41][1] = -44.62
+
         self.path = utils.se2_pose_list_to_path(self.path_tuples, 'map')
         self.global_path_pub.publish(self.path)
 
@@ -119,6 +131,14 @@ class PathFollower():
         self.follow_path()
 
     def follow_path(self):
+
+        print(self.path_tuples[11])
+
+        global OBS_DIST_MULT
+        global CUMUL_ROT_DIST_MULT
+        global FOLLOW_DIST_MULT
+        global COLLISION_RADIUS
+
         while not rospy.is_shutdown():
             # timing for debugging...loop time should be less than 1/CONTROL_RATE
             tic = rospy.Time.now()
@@ -182,32 +202,62 @@ class PathFollower():
             """
             # calculate final cost and choose best option
             print("3) Calculate the final cost and choose the best control option!")
+
+            print(f"cur path index: {self.cur_path_index}")
+
             if len(valid_opts) == 0:
                 control = [-0.1, 0] # hardcoded recover if all options infeasible
             else:
                 final_cost = []
+                
+                # if self.cur_path_index >= 6:
+                #     OBS_DIST_MULT = .2
+                #     CUMUL_ROT_DIST_MULT = .38
+                # if self.cur_path_index >= 10:
+                #     COLLISION_RADIUS = 0.27
+                # if self.cur_path_index >= 23:
+                #     OBS_DIST_MULT = .25
+                    
+
+                    
                 for opt in valid_opts:
+
+                    cur_path_goal = self.path_tuples[self.cur_path_index]
+
                     last_pose = local_paths[-1, opt, :]
 
                     trans_dist = np.linalg.norm(last_pose[:2] - self.cur_goal[:2])
 
                     if trans_dist < MIN_TRANS_DIST_TO_USE_ROT:
-                        # abs_theta_diff = np.abs(last_pose[2] - self.cur_goal[2])
-                        # rot_dist = min(np.pi*2 - abs_theta_diff, abs_theta_diff)
-                        rot_error = np.arctan2(
-                            self.cur_goal[1] - last_pose[1],
-                            self.cur_goal[0] - last_pose[1]
-                        ) - last_pose[2]
-                        rot_error = (rot_error + np.pi) % (2*np.pi) - np.pi
-                        rot_dist = np.abs(rot_error)
+                    # if True:
+                        abs_theta_diff = np.abs(last_pose[2] - self.cur_goal[2])
+                        rot_dist = min(np.pi*2 - abs_theta_diff, abs_theta_diff)
+                        # rot_error = np.arctan2(
+                        #     self.cur_goal[1] - last_pose[1],
+                        #     self.cur_goal[0] - last_pose[0]
+                        # ) - last_pose[2]
+                        # rot_error = (rot_error + np.pi) % (2*np.pi) - np.pi
+                        # rot_dist = np.abs(rot_error)
                     else:
                         rot_dist = 0
 
-                    print(rot_dist)
-
                     obs_pen = OBS_DIST_MULT / (local_paths_lowest_collision_dist[opt] + 0.1) # 0.1 for numerical stability
 
-                    cost = trans_dist + ROT_DIST_MULT * rot_dist + obs_pen
+                    cumul_rot_dist = 0
+                    prev_pose = local_paths[0, opt, :]
+                    for pose in local_paths[1:, opt]:
+                        abs_theta_diff = np.abs(prev_pose[2] - pose[2])
+                        incr_rot_dist = min(np.pi*2 - abs_theta_diff, abs_theta_diff)
+                        cumul_rot_dist += incr_rot_dist
+                        prev_pose = pose
+
+                    follow_dist_cost = 0
+                    for pose in local_paths[:, opt]:
+                        dist = np.linalg.norm(pose[:2] - cur_path_goal[:2])
+                        follow_dist_cost += dist
+
+                    # cost = trans_dist + ROT_DIST_MULT * rot_dist + obs_pen + CUMUL_ROT_DIST_MULT * cumul_rot_dist
+                    cost = trans_dist + ROT_DIST_MULT * rot_dist + obs_pen + CUMUL_ROT_DIST_MULT * cumul_rot_dist + FOLLOW_DIST_MULT * follow_dist_cost
                     final_cost.append(cost)
                 
                 final_cost = np.array(final_cost)
@@ -222,8 +272,8 @@ class PathFollower():
             self.cmd_pub.publish(utils.unicyle_vel_to_twist(control))
 
             # uncomment out for debugging if necessary
-            print("Selected control: {control}, Loop time: {time}, Max time: {max_time}".format(
-                control=control, time=(rospy.Time.now() - tic).to_sec(), max_time=1/CONTROL_RATE))
+            # print("Selected control: {control}, Loop time: {time}, Max time: {max_time}".format(
+            #     control=control, time=(rospy.Time.now() - tic).to_sec(), max_time=1/CONTROL_RATE))
 
             self.rate.sleep()
 

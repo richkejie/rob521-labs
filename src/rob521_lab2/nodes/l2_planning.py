@@ -102,11 +102,18 @@ class PathPlanner:
 
         self.bottleneck_bounds = bottleneck_bounds
         self.obstacle_bounds = obstacle_bounds
+        self.rrt_star_willow_end_bounds = [
+            EasyBounds(-1, -48, 45, 30),    #0
+            EasyBounds(-1, -48, 45, 12),    #1
+            EasyBounds(24.5, -40, 6,5),   #2
+            EasyBounds(30.5, -45.5, 13,9),   #3
+            EasyBounds(35, -45, 7.5, 2),     #4
+        ]
 
         #Robot information
         self.robot_radius = 0.22 #m
-        self.vel_max = 0.5 #m/s (Feel free to change!)
-        self.rot_vel_max = 0.2 #rad/s (Feel free to change!)
+        self.vel_max = 0.55 #m/s (Feel free to change!)
+        self.rot_vel_max = 0.23 #rad/s (Feel free to change!)
 
         #Goal Parameters
         self.goal_point = goal_point #m
@@ -146,17 +153,20 @@ class PathPlanner:
             self.draw_easy_bounds(easy_bound)
         for easy_bound in self.obstacle_bounds:
             self.draw_easy_bounds(easy_bound)
+        if 'willow' in self.map_name:
+            for easy_bound in self.rrt_star_willow_end_bounds:
+                self.draw_easy_bounds(easy_bound, (255, 0, 0))
 
         return
 
-    def draw_easy_bounds(self, easy_bounds):
-        self.window.add_line(easy_bounds.bottom_left(), easy_bounds.bottom_right(), color=(0,0,255))
-        self.window.add_line(easy_bounds.bottom_right(), easy_bounds.top_right(), color=(0,0,255))
-        self.window.add_line(easy_bounds.top_right(), easy_bounds.top_left(), color=(0,0,255))
-        self.window.add_line(easy_bounds.top_left(), easy_bounds.bottom_left(), color=(0,0,255))
+    def draw_easy_bounds(self, easy_bounds, color=(0,0,255)):
+        self.window.add_line(easy_bounds.bottom_left(), easy_bounds.bottom_right(), color=color)
+        self.window.add_line(easy_bounds.bottom_right(), easy_bounds.top_right(), color=color)
+        self.window.add_line(easy_bounds.top_right(), easy_bounds.top_left(), color=color)
+        self.window.add_line(easy_bounds.top_left(), easy_bounds.bottom_left(), color=color)
 
     #Functions required for RRT
-    def sample_map_space(self, easy_bounds, GOAL_BIASING=True):
+    def sample_map_space(self, easy_bounds, GOAL_BIASING=False):
         """
         Return an [x, y] coordinate to drive the robot towards.
         Samples randomly within the map bounds, with a 5% chance to sample the goal.
@@ -579,113 +589,182 @@ class PathPlanner:
             iter += 1
 
     def rrt_star_planning(self):
-        while True:
-            # sample
-            new_point = self.sample_map_space(self.outer_easy_bounds)
+        iter = 0
+        iter_nearby = 0
+        iter_nearby_total = 0
+        num_to_search_nearby = self.hp_rrt_num_to_search_nearby
+        nearby_bounds_size = self.hp_rrt_nearby_easy_bounds_size
+        searching_nearby = False
+        nearby_bounds = None
 
-            # find closest node
+        collision_reduce_nearby_factor = 1
+
+        force_search_whole_map = 0
+
+        while True:
+
+            # if iter > 1700:
+            #     self.outer_easy_bounds = self.rrt_star_willow_end_bounds[0]
+            if iter > 1800:
+                self.outer_easy_bounds = self.rrt_star_willow_end_bounds[1]
+            if iter > 3400:
+                self.outer_easy_bounds = self.rrt_star_willow_end_bounds[2]
+            if iter > 4600:
+                self.outer_easy_bounds = self.rrt_star_willow_end_bounds[3]
+            if iter > 5200:
+                self.outer_easy_bounds = self.rrt_star_willow_end_bounds[4]
+
+
+            # print(f"searching {'nearby' if searching_nearby else 'whole map'}")
+            #Sample map space
+            if not self.hp_rrt_search_nearby:
+                searching_nearby = False
+            
+            if searching_nearby and force_search_whole_map == 0:
+                new_point = self.sample_map_space(nearby_bounds)
+                iter_nearby += 1
+                iter_nearby_total += 1
+                if iter_nearby >= num_to_search_nearby:
+                    searching_nearby = False
+                elif iter_nearby_total >= 200: # hard cutoff
+                    searching_nearby = False
+                    iter_nearby_total = 0
+                    force_search_whole_map = 50
+            else:
+                new_point = self.sample_map_space(self.outer_easy_bounds)
+                force_search_whole_map = max(0, force_search_whole_map-1)
+
+            ## SHOW POINT ###
+            # self.window.add_point(
+            #     map_frame_point=np.array([new_point[0][0], new_point[1][0]]),
+            #     radius=2,
+            #     color=(255,0,0)
+            # )
+
+            #Get the closest point
             closest_node_id = self.closest_node(new_point.reshape(2,1))
             closest_node = self.nodes[closest_node_id]
 
             # simulate trajectory
+            collision_detected = False
             trajectory_o = self.connect_node_to_point(closest_node.point, new_point)
             if trajectory_o is None: # collisions exist in trajectory
-                continue
-            trajectory_cost = self.cost_to_come(trajectory_o)
+                # print("collision")
+                collision_detected = True
+            else:
+                trajectory_cost = self.cost_to_come(trajectory_o)
+            
+            if not collision_detected:
+                # add new node with costs
+                new_node = Node(
+                    trajectory_o[:,-1].reshape(3,1),
+                    closest_node_id,
+                    closest_node.cost + trajectory_cost
+                )
+                # print(new_node.point)
+                self.nodes.append(new_node)
 
-            # print(trajectory_o)
+                curr_node_id = len(self.nodes) - 1
+                curr_node = self.nodes[curr_node_id]
+                closest_node.children_ids.append(curr_node_id)
 
-            # add new node with costs
-            new_node = Node(
-                trajectory_o[:,-1].reshape(3,1),
-                closest_node_id,
-                closest_node.cost + trajectory_cost
-            )
-            # print(new_node.point)
-            self.nodes.append(new_node)
+                ### SHOW POINT ###
+                self.window.add_point(
+                    map_frame_point=np.array([new_node.point[0][0], new_node.point[1][0]]),
+                    radius=2,
+                    color=(0,255,0)
+                )
 
-            curr_node_id = len(self.nodes) - 1
-            curr_node = self.nodes[curr_node_id]
-            closest_node.children_ids.append(curr_node_id)
-
-            #### show point ####
-            self.window.add_point(
-                map_frame_point=np.array([new_node.point[0][0], new_node.point[1][0]]),
-                radius=1,
-                color=(0,255,0)
-            )
-
-            # last node rewiring: treat the curr_node as a child and find the best parent
-            near_nodes = self.find_near_nodes(curr_node.point)
-            # print(near_nodes)
-            for near_node_id in near_nodes:
-                if curr_node.parent_id == near_node_id:
-                    continue # don't need to check existing connection
-
-                # print(near_node_id)
-                near_node = self.nodes[near_node_id]
-                # print(near_node.point)
-                new_trajectory = self.connect_node_to_point(near_node.point, curr_node.point[:2]) # connect near_node --> curr_node
-                if new_trajectory is None:
-                    continue # skip if there is collision
-
-                new_trajectory_cost = near_node.cost + self.cost_to_come(new_trajectory)
-                if new_trajectory_cost < curr_node.cost:
-                    curr_node.cost = new_trajectory_cost
-                    self.nodes[curr_node.parent_id].children_ids.remove(curr_node_id) # remove curr_node as a child of its parent
-                    curr_node.parent_id = near_node_id # update parent
-                    near_node.children_ids.append(curr_node_id) # add curr_node as child of the new parent
-
-            # near edge rewiring: treat curr_node as a parent and check for potential children
-            for _ in range(5):
+                # last node rewiring: treat the curr_node as a child and find the best parent
                 near_nodes = self.find_near_nodes(curr_node.point)
                 for near_node_id in near_nodes:
-                    if self.is_parent(curr_node, near_node_id) or near_node_id == -1:
-                        continue # skip if near_node is parent of curr_node
+                    if curr_node.parent_id == near_node_id:
+                        continue # don't need to check existing connection
+
                     near_node = self.nodes[near_node_id]
-                    new_trajectory = self.connect_node_to_point(curr_node.point, near_node.point[:2]) # connect curr_node --> near_node
+                    new_trajectory = self.connect_node_to_point(near_node.point, curr_node.point[:2]) # connect near_node --> curr_node
                     if new_trajectory is None:
                         continue # skip if there is collision
 
-                    new_trajectory_cost = curr_node.cost + self.cost_to_come(new_trajectory)
+                    new_trajectory_cost = near_node.cost + self.cost_to_come(new_trajectory)
+                    if new_trajectory_cost < curr_node.cost:
+                        curr_node.cost = new_trajectory_cost
+                        self.nodes[curr_node.parent_id].children_ids.remove(curr_node_id) # remove curr_node as a child of its parent
+                        curr_node.parent_id = near_node_id # update parent
+                        near_node.children_ids.append(curr_node_id) # add curr_node as child of the new parent
 
-                    if new_trajectory_cost < near_node.cost:
-                        delta = near_node.cost - new_trajectory_cost
-                        near_node.cost = new_trajectory_cost
-                        self.nodes[near_node.parent_id].children_ids.remove(near_node_id)
-                        near_node.parent_id = curr_node_id
-                        curr_node.children_ids.append(near_node_id)
-                        self.update_children(near_node_id, delta)
-                        curr_node = near_node
-                        curr_node_id = near_node_id
-                        break
+                # near edge rewiring: treat curr_node as a parent and check for potential children
+                for _ in range(5):
+                    near_nodes = self.find_near_nodes(curr_node.point)
+                    for near_node_id in near_nodes:
+                        if self.is_parent(curr_node, near_node_id) or near_node_id == -1:
+                            continue # skip if near_node is parent of curr_node
+                        near_node = self.nodes[near_node_id]
+                        new_trajectory = self.connect_node_to_point(curr_node.point, near_node.point[:2]) # connect curr_node --> near_node
+                        if new_trajectory is None:
+                            continue # skip if there is collision
 
-            # check for early end
-            dist_to_goal = np.sqrt((new_node.point[0] - self.goal_point[0])**2 + (new_node.point[1] - self.goal_point[1])**2)
-            if dist_to_goal <= self.stopping_dist:
-                final_node = self.nodes[-1]
-                final_trajectory = [final_node.point]
+                        new_trajectory_cost = curr_node.cost + self.cost_to_come(new_trajectory)
 
-                # draw graph
-                # while final_node.parent_id != -1:
-                #     final_trajectory = [self.nodes[final_node.parent_id].point] + final_trajectory
-                #     final_node = self.nodes[final_node.parent_id]
+                        if new_trajectory_cost < near_node.cost:
+                            delta = near_node.cost - new_trajectory_cost
+                            near_node.cost = new_trajectory_cost
+                            self.nodes[near_node.parent_id].children_ids.remove(near_node_id)
+                            near_node.parent_id = curr_node_id
+                            curr_node.children_ids.append(near_node_id)
+                            self.update_children(near_node_id, delta)
+                            curr_node = near_node
+                            curr_node_id = near_node_id
+                            break
 
-                # for i, pt in enumerate(final_trajectory):
-                #     self.window.add_point(
-                #         map_frame_point=np.array([pt[0][0], pt[1][0]]),
-                #         radius=2,
-                #         color=(0,0,255)
-                #     )
-                #     if i < len(final_trajectory) - 1:
-                #         self.window.add_line(
-                #             np.array([pt[0][0], pt[1][0]]),
-                #             final_trajectory[i+1][:2],
-                #             width=1,
-                #             color=(0,0,255)
-                #         )
-                
-                return self.nodes
+                # check for early end
+                dist_to_goal = np.sqrt((new_node.point[0] - self.goal_point[0])**2 + (new_node.point[1] - self.goal_point[1])**2)
+                if dist_to_goal <= self.stopping_dist:
+                    return self.nodes
+
+                if (self.hp_rrt_search_nearby):
+                    if not searching_nearby or self.hp_rrt_nearby_search_reset_on_found:
+                        x_bound = new_node.point[0][0] - nearby_bounds_size/2
+                        if x_bound < self.outer_easy_bounds.x:
+                            x_bound = self.outer_easy_bounds.x
+                        elif x_bound > self.outer_easy_bounds.x + self.outer_easy_bounds.width:
+                            x_bound = self.outer_easy_bounds.x + self.outer_easy_bounds.width - nearby_bounds_size
+                        y_bound = new_node.point[1][0] - nearby_bounds_size/2
+                        if y_bound < self.outer_easy_bounds.y:
+                            y_bound = self.outer_easy_bounds.y
+                        elif y_bound > self.outer_easy_bounds.y + self.outer_easy_bounds.height:
+                            y_bound = self.outer_easy_bounds.y + self.outer_easy_bounds.height - nearby_bounds_size
+                        nearby_bounds = EasyBounds(
+                            x_bound,
+                            y_bound,
+                            nearby_bounds_size,
+                            nearby_bounds_size
+                        )
+                        if np.random.rand() < 0.9:
+                            for easy_bounds in self.bottleneck_bounds:
+                                if easy_bounds.in_bounds(new_point[0:2]):
+                                    nearby_bounds = easy_bounds
+                                    break
+                        searching_nearby = True
+                        iter_nearby = 0
+            else:
+                if self.hp_rrt_search_nearby:
+                    if self.hp_rrt_collision_reduce_nearby_search > 0:
+                        iter_nearby = max(
+                            (iter_nearby + self.hp_rrt_collision_reduce_nearby_search)*collision_reduce_nearby_factor, 
+                            0
+                        )
+                        iter_nearby_total = max(
+                            (iter_nearby_total + self.hp_rrt_collision_reduce_nearby_search)*collision_reduce_nearby_factor, 
+                            0
+                        )
+                    if searching_nearby:
+                        collision_reduce_nearby_factor += 2
+                    else:
+                        collision_reduce_nearby_factor = max(1, collision_reduce_nearby_factor-1)
+
+            print(f"iter {iter}; {'valid' if not collision_detected else 'collision'}")
+            iter += 1      
 
 
 
@@ -753,7 +832,10 @@ def main():
     #Leftover test functions
     np.save("shortest_path.npy", node_path_metric)
 
-def rrt_planning_test_willow():
+def rrt_planning_test_willow(rrt_star=False):
+
+    if rrt_star: print("using rrt*")
+
     #Set map information
     map_filename = "willowgarageworld_05res.png"
     map_setings_filename = "willowgarageworld_05res.yaml"
@@ -765,24 +847,49 @@ def rrt_planning_test_willow():
     #RRT precursor
     outer_easy_bounds = EasyBounds(-1, -48, 45, 58)
 
-    hyperparameters = {
-        "duplicate_threshold": 0.05, # m
-        "rrt_num_to_search_nearby": 80,
-        "rrt_nearby_easy_bounds_size": 4,
-        "rrt_nearby_search_reset_on_found": True,
-        "rrt_collision_reduce_nearby_search": 2,
-        "ctrl_kpv": 1,
-        "ctrl_kpw": 4
-    }
+    if rrt_star:
+        hyperparameters = {
+            "duplicate_threshold": 0.05, # m
+            # "rrt_search_nearby": False,
+            "rrt_num_to_search_nearby": 90,
+            "rrt_nearby_easy_bounds_size": 6,
+            "rrt_nearby_search_reset_on_found": True,
+            "rrt_collision_reduce_nearby_search": 0,
+            "ctrl_kpv": 0.85,
+            "ctrl_kpw": 4.7
+        }
 
-    bottleneck_bounds = []
-    
-    bottleneck_bounds.append(EasyBounds(24, -41, 6, 4))
+        bottleneck_bounds = []
 
-    bottleneck_bounds.append(EasyBounds(30, -40.5, 7, 2.5))
-    bottleneck_bounds.append(EasyBounds(30, -43, 7, 2.5))
-    bottleneck_bounds.append(EasyBounds(32, -45.5, 7, 2.5))
-    bottleneck_bounds.append(EasyBounds(39, -44, 3, 1))
+        bottleneck_bounds.append(EasyBounds(3, -40, 2, 4))
+
+        # bottleneck_bounds.append(EasyBounds(0, -48, 28.5, 10))
+        
+        bottleneck_bounds.append(EasyBounds(26, -38, 4.5, 1.5))
+        bottleneck_bounds.append(EasyBounds(30.5, -40, 7.5, 3.5))
+        # bottleneck_bounds.append(EasyBounds(28.5, -40.5, 9.5, 2.5))
+        bottleneck_bounds.append(EasyBounds(30.5, -43, 7.5, 3))
+        bottleneck_bounds.append(EasyBounds(32, -45.5, 7.5, 2.5))
+        bottleneck_bounds.append(EasyBounds(39.5, -45.5, 3, 2.5))
+    else:
+        hyperparameters = {
+            "duplicate_threshold": 0.05, # m
+            "rrt_num_to_search_nearby": 80,
+            "rrt_nearby_easy_bounds_size": 4,
+            "rrt_nearby_search_reset_on_found": True,
+            "rrt_collision_reduce_nearby_search": 2,
+            "ctrl_kpv": 1,
+            "ctrl_kpw": 4
+        }
+
+        bottleneck_bounds = []
+        
+        bottleneck_bounds.append(EasyBounds(24, -41, 6, 4))
+
+        bottleneck_bounds.append(EasyBounds(30, -40.5, 7, 2.5))
+        bottleneck_bounds.append(EasyBounds(30, -43, 7, 2.5))
+        bottleneck_bounds.append(EasyBounds(32, -45.5, 7, 2.5))
+        bottleneck_bounds.append(EasyBounds(39, -44, 3, 1))
 
     path_planner = PathPlanner(
         map_filename, 
@@ -794,20 +901,32 @@ def rrt_planning_test_willow():
         hyperparameters,
         bottleneck_bounds
     )
-    nodes = path_planner.rrt_planning()
+    if rrt_star:
+        nodes = path_planner.rrt_star_planning()
+    else:
+        nodes = path_planner.rrt_planning()
     node_path_metric = np.hstack(path_planner.recover_path())
 
     #Leftover test functions
-    np.save("will_path.npy", node_path_metric)
+    if rrt_star:
+        np.save("will_path_rrt_star.npy", node_path_metric)
+    else:
+        np.save("will_path.npy", node_path_metric)
 
     # draw found path
-    points = np.load("will_path.npy").T
-    path_planner.plot(points)
+    if rrt_star:
+        points = np.load("will_path_rrt_star.npy").T
+        path_planner.plot(points)
 
-    path_planner.window.save_img("willow_rrt.png")
+        path_planner.window.save_img("willow_rrt_star.png")
+    else:
+        points = np.load("will_path.npy").T
+        path_planner.plot(points)
+
+        path_planner.window.save_img("willow_rrt.png")
 
 def rrt_planning_test_myhal(rrt_star=True):
-    print("using rrt*")
+    if rrt_star: print("using rrt*")
 
     #Set map information
     map_filename = "myhal.png"
