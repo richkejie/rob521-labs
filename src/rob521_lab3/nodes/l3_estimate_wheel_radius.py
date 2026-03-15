@@ -8,7 +8,8 @@ from std_msgs.msg import Empty
 from geometry_msgs.msg import Twist
 
 INT32_MAX = 2**31
-DRIVEN_DISTANCE = 0.75 #in meters
+# DRIVEN_DISTANCE = 0.75 #in meters
+DRIVEN_DISTANCE = 1.2192 # for straight line rosbag
 TICKS_PER_ROTATION = 4096
 
 class wheelRadiusEstimator():
@@ -76,8 +77,27 @@ class wheelRadiusEstimator():
             # # YOUR CODE HERE!!!
             # Calculate the radius of the wheel based on encoder measurements
 
-            # radius = ##
-            # print('Calibrated Radius: {} m'.format(radius))
+            # The robot drove a straight line of DRIVEN_DISTANCE metres.
+            # Each wheel rotated through del_left/right_encoder ticks.
+            # Converting ticks to radians:
+            #   del_phi = ticks * (2*pi / TICKS_PER_ROTATION)
+            # Because arc_length = radius * angle:
+            #   DRIVEN_DISTANCE = radius * del_phi  =>  radius = DRIVEN_DISTANCE / del_phi
+            # Average the two wheels for a more robust estimate.
+ 
+            self.lock.acquire()
+            del_left  = self.del_left_encoder
+            del_right = self.del_right_encoder
+            self.lock.release()
+ 
+            del_phi_left  = del_left  * (2.0 * np.pi / TICKS_PER_ROTATION)  # radians
+            del_phi_right = del_right * (2.0 * np.pi / TICKS_PER_ROTATION)  # radians
+ 
+            radius_left  = DRIVEN_DISTANCE / del_phi_left
+            radius_right = DRIVEN_DISTANCE / del_phi_right
+            radius = (radius_left + radius_right) / 2.0
+ 
+            print('Calibrated Radius: {} m'.format(radius))
 
             #Reset the robot and calibration routine
             self.lock.acquire()

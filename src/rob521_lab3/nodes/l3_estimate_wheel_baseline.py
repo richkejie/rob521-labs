@@ -35,7 +35,7 @@ class wheelBaselineEstimator():
         #Reset the robot 
         reset_msg = Empty()
         self.reset_pub.publish(reset_msg)
-        print('Ready to start wheel radius calibration!')
+        print('Ready to start wheel baseline calibration!')
         return
 
     def safeDelPhi(self, a, b):
@@ -74,11 +74,44 @@ class wheelBaselineEstimator():
         elif self.isMoving is True and np.isclose(msg.angular.z, 0):
             self.isMoving = False #Set the state to stopped
 
+            print(f"Cycle complete — left: {self.del_left_encoder}, right: {self.del_right_encoder}")
+
             # # YOUR CODE HERE!!!
             # Calculate the radius of the wheel based on encoder measurements
 
-            # separation = ##
-            # print('Calibrated Separation: {} m'.format(separation))
+            # The robot spun in place for NUM_ROTATIONS full rotations, so the total
+            # heading change is:
+            #   theta_total = 2 * pi * NUM_ROTATIONS
+            #
+            # For a differential-drive robot spinning in place, each wheel travels an
+            # arc length equal to (baseline / 2) * theta_total:
+            #   arc_length = WHEEL_RADIUS * del_phi  =>  (b/2) * theta = r * del_phi
+            #   b = 2 * r * del_phi / theta_total
+            #
+            # The left wheel moves backward (negative ticks) and the right wheel moves
+            # forward (positive ticks), so we use their absolute values and average for
+            # the best estimate.
+ 
+            self.lock.acquire()
+            del_left  = self.del_left_encoder
+            del_right = self.del_right_encoder
+            self.lock.release()
+ 
+            # del_phi_left  = np.abs(del_left)  * (2.0 * np.pi / TICKS_PER_ROTATION)  # radians
+            # del_phi_right = np.abs(del_right) * (2.0 * np.pi / TICKS_PER_ROTATION)  # radians
+ 
+            # theta_total = 2.0 * np.pi * NUM_ROTATIONS  # total robot rotation in radians
+
+            # separation_from_left  = 2.0 * WHEEL_RADIUS * del_phi_left  / theta_total
+            # separation_from_right = 2.0 * WHEEL_RADIUS * del_phi_right / theta_total
+            # separation = (separation_from_left + separation_from_right) / 2.0
+
+            ticks = (np.abs(del_left) + np.abs(del_right)) / 2
+            del_phi = ticks * (2 * np.pi / TICKS_PER_ROTATION)
+            theta_total = 2 * np.pi * NUM_ROTATIONS
+            separation = 2 * WHEEL_RADIUS * del_phi / theta_total
+ 
+            print('Calibrated Separation: {} m'.format(separation))
 
             #Reset the robot and calibration routine
             self.lock.acquire()
