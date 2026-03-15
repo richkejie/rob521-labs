@@ -65,6 +65,18 @@ class WheelOdom:
         self.bag.close()
         print("saving bag")
 
+    def safeDelPhi(self, a, b):
+        # Handle int32 encoder overflow/underflow
+        INT32_MAX = 2**31
+        diff = np.int64(b) - np.int64(a)
+        if diff < -np.int64(INT32_MAX):
+            delPhi = (INT32_MAX - 1 - a) + (INT32_MAX + b) + 1
+        elif diff > np.int64(INT32_MAX) - 1:
+            delPhi = (INT32_MAX + a) + (INT32_MAX - 1 - b) + 1
+        else:
+            delPhi = b - a
+        return delPhi
+
     def sensor_state_cb(self, sensor_state_msg):
         # Callback for whenever a new encoder message is published
         # set initial encoder pose
@@ -89,6 +101,48 @@ class WheelOdom:
             # self.twist.linear.y = mu_dot[1].item()
             # self.twist.angular.z = mu_dot[2].item()
 
+            current_time = sensor_state_msg.header.stamp
+ 
+            # 1. Compute raw encoder deltas (handles overflow)
+            del_enc_l = self.safeDelPhi(self.last_enc_l, le)
+            del_enc_r = self.safeDelPhi(self.last_enc_r, re)
+ 
+            # 2. Convert encoder ticks to wheel rotation angles (radians)
+            del_phi_l = del_enc_l * RAD_PER_TICK
+            del_phi_r = del_enc_r * RAD_PER_TICK
+ 
+            # 3. Compute linear displacement and heading change
+            #    ds    = average arc length of both wheels
+            #    dtheta = difference in arc length divided by full baseline (2*BASELINE)
+            ds     = WHEEL_RADIUS * (del_phi_r + del_phi_l) / 2.0
+            dtheta = WHEEL_RADIUS * (del_phi_r - del_phi_l) / (2.0 * BASELINE)
+ 
+            # 4. Get current heading from pose quaternion
+            theta = euler_from_ros_quat(self.pose.orientation)[2]
+ 
+            # 5. Integrate pose using midpoint method
+            #    Evaluate direction at the midpoint heading (theta + dtheta/2)
+            #    for better accuracy than simple Euler integration
+            theta_mid = theta + dtheta / 2.0
+            self.pose.position.x += ds * np.cos(theta_mid)
+            self.pose.position.y += ds * np.sin(theta_mid)
+ 
+            # 6. Update heading quaternion
+            new_theta = theta + dtheta
+            self.pose.orientation = ros_quat_from_euler([0.0, 0.0, new_theta])
+ 
+            # 7. Compute twist (velocity) from pose delta over elapsed time
+            dt = (current_time - self.last_time).to_sec()
+            if dt > 0:
+                self.twist.linear.x  = ds * np.cos(theta_mid) / dt
+                self.twist.linear.y  = ds * np.sin(theta_mid) / dt
+                self.twist.angular.z = dtheta / dt
+ 
+            # 8. Store encoder and time for next iteration
+            self.last_enc_l = le
+            self.last_enc_r = re
+            self.last_time  = current_time
+
             # publish the updates as a topic and in the tf tree
             current_time = rospy.Time.now()
             self.wheel_odom_tf.header.stamp = current_time
@@ -110,6 +164,15 @@ class WheelOdom:
             #     self.odom.pose.pose.position.x, self.odom.pose.pose.position.y,
             #     euler_from_ros_quat(self.odom.pose.pose.orientation)[2]
             # ))
+
+            # for testing against actual odom
+            print("Wheel Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
+                self.pose.position.x, self.pose.position.y, new_theta
+            ))
+            print("Turtlebot3 Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
+                self.odom.pose.pose.position.x, self.odom.pose.pose.position.y,
+                euler_from_ros_quat(self.odom.pose.pose.orientation)[2]
+            ))
 
     def odom_cb(self, odom_msg):
         # get odom from turtlebot3 packages
