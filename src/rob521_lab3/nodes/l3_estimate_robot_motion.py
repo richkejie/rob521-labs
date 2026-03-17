@@ -19,7 +19,7 @@ from utils import convert_pose_to_tf, euler_from_ros_quat, ros_quat_from_euler
 
 
 ENC_TICKS = 4096
-RAD_PER_TICK = 0.001533981
+RAD_PER_TICK = 0.001533981 # 2pi / 4096
 WHEEL_RADIUS = .066 / 2
 BASELINE = .287 / 2
 
@@ -42,7 +42,8 @@ class WheelOdom:
         self.wheel_odom_tf.header.frame_id = 'odom'
         self.wheel_odom_tf.child_frame_id = 'wo_base_link'
         self.pose = Pose()
-        self.pose.orientation.w = 1.0
+        # self.pose.orientation.w = 1.0
+        self.pose.orientation.z = 1.0 # set for rosbag playback
         self.twist = Twist()
         self.last_enc_l = None
         self.last_enc_r = None
@@ -56,10 +57,22 @@ class WheelOdom:
         # reset current odometry to allow comparison with this node
         reset_pub = rospy.Publisher('/reset', Empty, queue_size=1, latch=True)
         reset_pub.publish(Empty())
-        while not rospy.is_shutdown() and (self.odom.pose.pose.position.x >= 1e-3 or self.odom.pose.pose.position.y >= 1e-3 or
-               self.odom.pose.pose.orientation.z >= 1e-2):
-            time.sleep(0.2)  # allow reset_pub to be ready to publish
-        print('Robot odometry reset.')
+        # while not rospy.is_shutdown() and (self.odom.pose.pose.position.x >= 1e-3 or self.odom.pose.pose.position.y >= 1e-3 or
+        #        self.odom.pose.pose.orientation.z >= 1e-2):
+        #     time.sleep(0.2)  # allow reset_pub to be ready to publish
+        # FIXME: provided reset code is incorrect???
+        while not rospy.is_shutdown() and (
+            abs(self.odom.pose.pose.position.x) >= 1e-3 or
+            abs(self.odom.pose.pose.position.y) >= 1e-3 or
+            abs(euler_from_ros_quat(self.odom.pose.pose.orientation)[2]) >= 1e-2
+        ):
+            time.sleep(0.2)
+        print('******************************\nRobot odometry reset.\n******************************')
+
+        # FIXME: Initialize wheel odom from onboard odom?? maybe only for rosbag playback
+        # self.pose.position.x = self.odom.pose.pose.position.x
+        # self.pose.position.y = self.odom.pose.pose.position.y
+        # self.pose.orientation = self.odom.pose.pose.orientation
 
         rospy.spin()
         self.bag.close()
@@ -90,6 +103,7 @@ class WheelOdom:
             re = sensor_state_msg.right_encoder
 
             # # YOUR CODE HERE!!!
+            # # ===============================================================
             # Update your odom estimates with the latest encoder measurements and populate the relevant area
             # of self.pose and self.twist with estimated position, heading and velocity
 
@@ -131,11 +145,11 @@ class WheelOdom:
             new_theta = theta + dtheta
             self.pose.orientation = ros_quat_from_euler([0.0, 0.0, new_theta])
  
-            # 7. Compute twist (velocity) from pose delta over elapsed time
+            # 7. Compute twist (velocity) from pose delta over elapsed time in robot frame
             dt = (current_time - self.last_time).to_sec()
             if dt > 0:
-                self.twist.linear.x  = ds * np.cos(theta_mid) / dt
-                self.twist.linear.y  = ds * np.sin(theta_mid) / dt
+                self.twist.linear.x  = ds / dt
+                self.twist.linear.y  = 0.0  # Assuming no lateral movement
                 self.twist.angular.z = dtheta / dt
  
             # 8. Store encoder and time for next iteration
@@ -143,13 +157,25 @@ class WheelOdom:
             self.last_enc_r = re
             self.last_time  = current_time
 
+            # # ===============================================================
             # publish the updates as a topic and in the tf tree
-            current_time = rospy.Time.now()
-            self.wheel_odom_tf.header.stamp = current_time
+            # current_time = rospy.Time.now()
+            # self.wheel_odom_tf.header.stamp = current_time
+            # self.wheel_odom_tf.transform = convert_pose_to_tf(self.pose)
+            # self.tf_br.sendTransform(self.wheel_odom_tf)
+
+            # self.wheel_odom.header.stamp = current_time
+            # self.wheel_odom.pose.pose = self.pose
+            # self.wheel_odom.twist.twist = self.twist
+            # self.wheel_odom_pub.publish(self.wheel_odom)
+
+            # FIXME: use the timestamp from the sensor message for better synchronization in the bag file
+            pub_time = sensor_state_msg.header.stamp
+            self.wheel_odom_tf.header.stamp = pub_time
             self.wheel_odom_tf.transform = convert_pose_to_tf(self.pose)
             self.tf_br.sendTransform(self.wheel_odom_tf)
 
-            self.wheel_odom.header.stamp = current_time
+            self.wheel_odom.header.stamp = pub_time
             self.wheel_odom.pose.pose = self.pose
             self.wheel_odom.twist.twist = self.twist
             self.wheel_odom_pub.publish(self.wheel_odom)
@@ -157,19 +183,10 @@ class WheelOdom:
             self.bag.write('odom_est', self.wheel_odom)
 
             # for testing against actual odom
-            # print("Wheel Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
-            #     self.pose.position.x, self.pose.position.y, mu[2].item()
-            # ))
-            # print("Turtlebot3 Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
-            #     self.odom.pose.pose.position.x, self.odom.pose.pose.position.y,
-            #     euler_from_ros_quat(self.odom.pose.pose.orientation)[2]
-            # ))
-
-            # for testing against actual odom
             print("Wheel Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
                 self.pose.position.x, self.pose.position.y, new_theta
             ))
-            print("Turtlebot3 Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
+            print("Tbot3 Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
                 self.odom.pose.pose.position.x, self.odom.pose.pose.position.y,
                 euler_from_ros_quat(self.odom.pose.pose.orientation)[2]
             ))

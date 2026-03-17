@@ -6,6 +6,8 @@ import rospy
 import tf2_ros
 from skimage.draw import line as ray_trace
 import rospkg
+import matplotlib
+matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 
 # msgs
@@ -38,7 +40,8 @@ class OccupancyGripMap:
         # attributes
         width = int(MAP_DIM[0] / CELL_SIZE); height = int(MAP_DIM[1] / CELL_SIZE)
         self.log_odds = np.zeros((width, height))
-        self.np_map = np.ones((width, height), dtype=np.uint8) * -1  # -1 for unknown
+                                      # probably not np.uint8
+        self.np_map = np.ones((width, height), dtype=np.int8) * -1  # -1 for unknown
         self.map_msg = OccupancyGrid()
         self.map_msg.info = MapMetaData()
         self.map_msg.info.resolution = CELL_SIZE
@@ -93,28 +96,64 @@ class OccupancyGripMap:
         odom_map[2] = euler_from_ros_quat(odom_map_tf.rotation)[2]
 
         # YOUR CODE HERE!!! Loop through each measurement in scan_msg to get the correct angle and
-        # x_start and y_start to send to your ray_trace_update function.
+        # This is to convert robot pose in map frame (metres) to pixel coordinates
+        x_start = int(odom_map[0] / CELL_SIZE)
+        y_start = int(odom_map[1] / CELL_SIZE)
+        theta_rob = odom_map[2]
 
+        # Loop through each measurement in scan_msg
+        for i in range(0, len(scan_msg.ranges), SCAN_DOWNSAMPLE):
+            range_mes = scan_msg.ranges[i]
+            
+            # Filter valid ranges based on sensor specifications
+            if scan_msg.range_min <= range_mes <= scan_msg.range_max:
+                # Calculate global angle: theta_k = angle_min + k * angle_increment
+                angle = theta_rob + scan_msg.angle_min + i * scan_msg.angle_increment
+                
+                # Execute ray tracing update
+                self.np_map, self.log_odds = self.ray_trace_update(
+                    self.np_map, self.log_odds, x_start, y_start, angle, range_mes
+                )
         # publish the message
         self.map_msg.info.map_load_time = rospy.Time.now()
-        self.map_msg.data = self.np_map.flatten()
+        self.map_msg.data = self.np_map.T.flatten()
         self.map_pub.publish(self.map_msg)
 
     def ray_trace_update(self, map, log_odds, x_start, y_start, angle, range_mes):
-        """
-        A ray tracing grid update as described in the lab document.
 
-        :param map: The numpy map.
-        :param log_odds: The map of log odds values.
-        :param x_start: The x starting point in the map coordinate frame (i.e. the x 'pixel' that the robot is in).
-        :param y_start: The y starting point in the map coordinate frame (i.e. the y 'pixel' that the robot is in).
-        :param angle: The ray angle relative to the x axis of the map.
-        :param range_mes: The range of the measurement along the ray.
-        :return: The numpy map and the log odds updated along a single ray.
-        """
-        # YOUR CODE HERE!!! You should modify the log_odds object and the numpy map based on the outputs from
-        # ray_trace and the equations from class. Your numpy map must be an array of int8s with 0 to 100 representing
-        # probability of occupancy, and -1 representing unknown.
+        # 1. Calculate the endpoint of the ray in pixel coordinates
+        x_end = int(x_start + (range_mes / CELL_SIZE) * np.cos(angle))
+        y_end = int(y_start + (range_mes / CELL_SIZE) * np.sin(angle))
+        
+        # 2. Get the indices of the pixels that belong to the LiDAR ray
+        # skimage.draw.line returns coordinates for the line
+        xx, yy = ray_trace(x_start, y_start, x_end, y_end)
+        
+        # 3. Filter out indices that fall outside the map boundaries
+        width, height = map.shape
+        valid_idx = (xx >= 0) & (xx < width) & (yy >= 0) & (yy < height)
+        xx = xx[valid_idx]
+        yy = yy[valid_idx]
+        
+        if len(xx) == 0:
+            return map, log_odds
+            
+        # 4. Define log odds constants based on p_occ = 0.6 and p_free = 0.4
+        l_occ = np.log(0.6 / 0.4)
+        l_free = np.log(0.4 / 0.6)
+        
+        # 5. Add l_free to every cell along the ray before the endpoint
+        if len(xx) > 1:
+            log_odds[xx[:-1], yy[:-1]] += l_free
+            
+        # 6. Add l_occ to the endpoint cell (the obstacle)
+        log_odds[xx[-1], yy[-1]] += l_occ
+        
+        # 7. Convert updated log odds back to probability (only for affected cells to save compute)
+        probs = self.log_odds_to_probability(log_odds[xx, yy])
+        
+        # 8. Store the result in map as integers between 0 and 100
+        map[xx, yy] = (probs * 100).astype(np.int8)
 
         return map, log_odds
 
